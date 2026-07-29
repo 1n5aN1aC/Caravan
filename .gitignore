@@ -2,3 +2,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
+
+# Card artwork is third-party and not ours to redistribute, so the images stay
+# local while the instructions for supplying them stay tracked.
+# See apps/web/src/assets/cards/README.md
+/cards/
+apps/web/src/assets/cards/*
+!apps/web/src/assets/cards/README.md
