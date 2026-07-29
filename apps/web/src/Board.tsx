@@ -7,16 +7,24 @@ import {
   listLegalMoves,
   resolveTracks,
   type CaravanStatus,
-  type MatchState,
   type Move,
   type Seat,
 } from '@caravan/rules';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { cardBackUrl } from './cardArt.js';
-import { AttachedCard, PlayingCard } from './PlayingCard.js';
+import { fanAngle, overlapStep, STACK_ROWS } from './layout.js';
+import { PlayingCard } from './PlayingCard.js';
+import { useCardDrag } from './useCardDrag.js';
 import { useDepartures } from './useDepartures.js';
 
 /**
+ * The table, laid out the way the cards would actually sit.
+ *
+ * Three columns, one per track. Both players build outward from a shared centre
+ * line: the first card of a caravan sits against the middle and each later card
+ * overlaps further towards its owner, so the newest card — the one that decides
+ * what may be played next — is always the fully visible one at the far end.
+ *
  * Selecting a card asks the shared rules engine for every legal destination and
  * lights exactly those up. Same code path the server validates with, so the
  * highlighting *is* the rules — which makes it the best teaching tool for
@@ -30,12 +38,20 @@ const slotKey = (seat: Seat, caravan: number, slot: number): TargetKey =>
 
 const SUIT_GLYPH = { S: '♠', H: '♥', D: '♦', C: '♣' } as const;
 
+/** The three tracks, typed narrowly so the engine's caravan index is satisfied. */
+const CARAVANS = [0, 1, 2] as const;
+
+const EMPTY_TARGETS: ReadonlyMap<TargetKey, Move> = new Map();
+
 export function Board({
   view,
   onMove,
+  panel,
 }: {
   view: RedactedState;
   onMove: (move: Move) => void;
+  /** Session chrome from App, hosted at the top of the hand column. */
+  panel?: ReactNode;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
 
@@ -51,12 +67,18 @@ export function Board({
 
   const selectedCard = hand.find((c) => c.id === selected) ?? null;
 
-  // Destinations for the currently selected card, keyed for O(1) lookup.
-  const targets = useMemo(() => {
-    const map = new Map<TargetKey, Move>();
-    if (!selectedCard) return map;
+  /**
+   * Every legal destination, grouped by the card that could go there. Built for
+   * the whole hand rather than just the selected card because a drag needs the
+   * destinations of whichever card the pointer picked up, which need not be the
+   * selected one.
+   */
+  const targetsByCard = useMemo(() => {
+    const byCard = new Map<string, Map<TargetKey, Move>>();
     for (const move of legal) {
-      if (move.type !== 'play' || move.cardId !== selectedCard.id) continue;
+      if (move.type !== 'play') continue;
+      let map = byCard.get(move.cardId);
+      if (!map) byCard.set(move.cardId, (map = new Map()));
       map.set(
         move.target.slot === undefined
           ? caravanKey(move.target.seat, move.target.caravan)
@@ -64,107 +86,145 @@ export function Board({
         move,
       );
     }
-    return map;
-  }, [legal, selectedCard]);
-
-  /** Cards with nowhere to go are dimmed rather than silently inert. */
-  const playable = useMemo(() => {
-    const ids = new Set<string>();
-    for (const move of legal) if (move.type === 'play') ids.add(move.cardId);
-    return ids;
+    return byCard;
   }, [legal]);
 
-  const canDiscard = legal.some(
-    (m) => m.type === 'discard' && m.cardId === selectedCard?.id,
-  );
-  const disbandable = new Set(
-    legal.filter((m) => m.type === 'disband').map((m) => m.caravan),
+  const fire = useCallback(
+    (move: Move) => {
+      setSelected(null);
+      onMove(move);
+    },
+    [onMove],
   );
 
-  const fire = (move: Move) => {
-    setSelected(null);
-    onMove(move);
-  };
+  const isTarget = useCallback(
+    (cardId: string, key: string) => targetsByCard.get(cardId)?.has(key) ?? false,
+    [targetsByCard],
+  );
+
+  const dropCard = useCallback(
+    (cardId: string, key: string) => {
+      const move = targetsByCard.get(cardId)?.get(key);
+      if (move) fire(move);
+    },
+    [targetsByCard, fire],
+  );
+
+  const toggle = useCallback(
+    (cardId: string) => setSelected((current) => (current === cardId ? null : cardId)),
+    [],
+  );
+
+  const { drag, handlers } = useCardDrag({
+    enabled: yourTurn,
+    isTarget,
+    onDrop: dropCard,
+    onClick: toggle,
+  });
+
+  // While dragging, the table highlights for the dragged card; otherwise for the
+  // selected one. Only ever one of the two.
+  const activeCard = drag ? drag.cardId : selectedCard?.id;
+  const targets = (activeCard && targetsByCard.get(activeCard)) || EMPTY_TARGETS;
+  const draggedCard = drag ? (hand.find((c) => c.id === drag.cardId) ?? null) : null;
+
+  const canDiscard = legal.some((m) => m.type === 'discard' && m.cardId === selectedCard?.id);
+  const disbandable = new Set(legal.filter((m) => m.type === 'disband').map((m) => m.caravan));
 
   return (
-    <div className={`board ${yourTurn ? 'active' : ''}`}>
-      <PlayerRow
-        who="opponent"
-        name="Opponent"
-        handCount={view.players[them].handCount}
-        deckCount={view.players[them].deckCount}
-        seat={them}
-        caravans={view.players[them].caravans}
-        engine={engine}
-        targets={targets}
-        onTarget={fire}
-      />
+    <div
+      className={`board ${yourTurn ? 'active' : ''} ${drag ? 'dragging' : ''}`}
+      style={{ '--rows': STACK_ROWS } as never}
+    >
+      {/* Panel, table and hand are placed by grid area rather than by document
+          order: side by side they stack panel-over-hand beside the table, but in
+          one column the panel has to lead and the hand has to follow the play
+          area. Document order is the one-column order, so that reading matches
+          exactly where it is tightest. */}
+      {panel}
 
-      <ol className="tracks" aria-label="Track status">
-        {tracks.map((track, i) => (
-          <li
-            key={i}
-            className={
-              track.decided
-                ? track.winner === you
-                  ? 'won'
-                  : 'lost'
-                : track.reason === 'tie'
-                  ? 'tied'
-                  : 'open'
-            }
-          >
-            <span className="n">{i + 1}</span>
-            {track.decided
-              ? track.winner === you
-                ? 'sold to you'
-                : 'sold to them'
-              : track.reason === 'tie'
-                ? 'tied'
-                : 'open'}
-          </li>
-        ))}
-      </ol>
+      <div className="table">
+        <div className="columns">
+          {CARAVANS.map((i) => (
+            <div className="column" key={i}>
+              <CaravanView
+                side="opponent"
+                caravan={view.players[them].caravans[i]!}
+                seat={them}
+                index={i}
+                targets={targets}
+                onTarget={fire}
+                dragOver={drag?.over ?? null}
+              />
 
-      <PlayerRow
-        who="you"
-        name="You"
-        deckCount={view.players[you].deckCount}
-        seat={you}
-        caravans={view.players[you].caravans}
-        engine={engine}
-        targets={targets}
-        onTarget={fire}
-        disbandable={disbandable}
-        onDisband={(caravan) => fire({ type: 'disband', caravan })}
-      />
+              <Gauge
+                index={i}
+                opponent={view.players[them].caravans[i]!}
+                yours={view.players[you].caravans[i]!}
+                opponentStatus={caravanStatus(engine, them, i)}
+                yourStatus={caravanStatus(engine, you, i)}
+                track={tracks[i]!}
+                you={you}
+                canDisband={disbandable.has(i)}
+                onDisband={() => fire({ type: 'disband', caravan: i })}
+              />
 
-      <div className="hand-area">
+              <CaravanView
+                side="you"
+                caravan={view.players[you].caravans[i]!}
+                seat={you}
+                index={i}
+                targets={targets}
+                onTarget={fire}
+                dragOver={drag?.over ?? null}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <aside className="hand-area">
+        {/* The opponent's counts live over here rather than over their cards:
+            they are read alongside your own hand and deck, not the table. */}
+        <p className="table-head">
+          <span className="who">Opponent</span>
+          <span className="pill">
+            {cardBackUrl ? (
+              <img className="facedown" src={cardBackUrl} alt="" aria-hidden="true" />
+            ) : (
+              <span className="facedown" aria-hidden="true" />
+            )}
+            {view.players[them].handCount} in hand
+          </span>
+          <span className="pill">{view.players[them].deckCount} in deck</span>
+        </p>
+
         <p className={`turn ${yourTurn ? 'yours' : ''}`}>
           {view.phase === 'over'
             ? 'Match over'
             : yourTurn
               ? view.phase === 'opening'
-                ? 'Your move — opening round: place a number card on an empty caravan'
-                : selectedCard
+                ? 'Opening round — place a number card on an empty caravan'
+                : activeCard
                   ? targets.size > 0
-                    ? `${targets.size} legal destination${targets.size === 1 ? '' : 's'} — pick one`
+                    ? `${targets.size} legal destination${targets.size === 1 ? '' : 's'}`
                     : 'Nowhere legal to play that one'
                   : 'Your move — pick a card'
               : 'Waiting for opponent…'}
         </p>
 
         <div className="hand">
-          {hand.map((card) => (
+          {hand.map((card, i) => (
             <button
               key={card.id}
               type="button"
               className={`hand-card ${selected === card.id ? 'selected' : ''} ${
-                yourTurn && !playable.has(card.id) ? 'unplayable' : ''
-              }`}
+                drag?.cardId === card.id ? 'lifted' : ''
+              } ${yourTurn && !targetsByCard.has(card.id) ? 'unplayable' : ''}`}
+              style={{ '--a': `${fanAngle(i, hand.length)}deg`, '--z': i } as never}
               disabled={!yourTurn}
               aria-pressed={selected === card.id}
-              onClick={() => setSelected(selected === card.id ? null : card.id)}
+              {...handlers(card.id)}
             >
               <PlayingCard card={card} size="large" />
             </button>
@@ -194,132 +254,189 @@ export function Board({
             </span>
           )}
         </div>
-      </div>
+      </aside>
+
+      {/* The dragged card, following the pointer. Rendered outside the hand so
+          nothing clips it, and inert so it never wins the hit test under the
+          cursor — which is how the drop target beneath it is found. */}
+      {drag && draggedCard && (
+        <div
+          className={`drag-ghost ${drag.over ? 'over' : ''}`}
+          style={{ left: drag.x, top: drag.y }}
+          aria-hidden="true"
+        >
+          <PlayingCard card={draggedCard} size="large" />
+        </div>
+      )}
     </div>
   );
 }
 
-function PlayerRow({
-  who,
-  name,
-  handCount,
-  deckCount,
-  seat,
-  caravans,
-  engine,
-  targets,
-  onTarget,
-  disbandable,
+/**
+ * The centre line for one track: both caravans' totals facing each other across
+ * the track's own state, so the comparison the whole game turns on reads in one
+ * place and neither player's cards have to carry a header.
+ */
+function Gauge({
+  index,
+  opponent,
+  yours,
+  opponentStatus,
+  yourStatus,
+  track,
+  you,
+  canDisband,
   onDisband,
 }: {
-  who: 'you' | 'opponent';
-  name: string;
-  handCount?: number;
-  deckCount: number;
-  seat: Seat;
-  caravans: RedactedCaravan[];
-  engine: MatchState;
-  targets: Map<TargetKey, Move>;
-  onTarget: (move: Move) => void;
-  disbandable?: Set<number>;
-  onDisband?: (caravan: 0 | 1 | 2) => void;
+  index: number;
+  opponent: RedactedCaravan;
+  yours: RedactedCaravan;
+  opponentStatus: CaravanStatus;
+  yourStatus: CaravanStatus;
+  track: ReturnType<typeof resolveTracks>[number];
+  you: Seat;
+  canDisband: boolean;
+  onDisband: () => void;
 }) {
+  const state = track.decided
+    ? track.winner === you
+      ? 'won'
+      : 'lost'
+    : track.reason === 'tie'
+      ? 'tied'
+      : 'open';
+  const label = track.decided
+    ? track.winner === you
+      ? 'sold to you'
+      : 'sold to them'
+    : track.reason === 'tie'
+      ? 'tied'
+      : 'open';
+
   return (
-    <section className={`row row-${who}`}>
-      <h2>
-        <span className="who">{name}</span>
-        {handCount !== undefined && (
-          <span className="pill">
-            {cardBackUrl ? (
-              <img className="facedown" src={cardBackUrl} alt="" aria-hidden="true" />
-            ) : (
-              <span className="facedown" aria-hidden="true" />
-            )}
-            {handCount} in hand
-          </span>
-        )}
-        <span className="pill">{deckCount} in deck</span>
-      </h2>
-      <div className="caravans">
-        {caravans.map((caravan, i) => (
-          <CaravanView
-            key={i}
-            caravan={caravan}
-            seat={seat}
-            index={i}
-            status={caravanStatus(engine, seat, i)}
-            targets={targets}
-            onTarget={onTarget}
-            canDisband={disbandable?.has(i) ?? false}
-            onDisband={onDisband}
-          />
-        ))}
+    <div className="gauge">
+      <Total caravan={opponent} status={opponentStatus} />
+      <div className={`track ${state}`}>
+        <span className="n">{index + 1}</span>
+        {label}
       </div>
-    </section>
+      <Total caravan={yours} status={yourStatus}>
+        {canDisband && (
+          <button
+            type="button"
+            className="disband"
+            title="Discard this whole caravan. You do not draw a card."
+            onClick={onDisband}
+          >
+            disband
+          </button>
+        )}
+      </Total>
+    </div>
+  );
+}
+
+function Total({
+  caravan,
+  status,
+  children,
+}: {
+  caravan: RedactedCaravan;
+  status: CaravanStatus;
+  children?: ReactNode;
+}) {
+  // The engine's derived helpers take a Caravan, and the redacted shape is one.
+  const direction = effectiveDirection(caravan);
+  const suit = effectiveSuit(caravan);
+  return (
+    <div className={`total status-${status}`}>
+      <span className="value" title="Caravan value">
+        {caravanValue(caravan)}
+      </span>
+      <span className="dir" title="Effective direction and suit">
+        {direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '—'}
+        {suit ? SUIT_GLYPH[suit] : ''}
+      </span>
+      {status !== 'building' && (
+        <span className="badge" title={BADGE_HELP[status]}>
+          {BADGE_TEXT[status]}
+        </span>
+      )}
+      {children}
+    </div>
   );
 }
 
 function CaravanView({
+  side,
   caravan,
   seat,
   index,
-  status,
   targets,
   onTarget,
-  canDisband,
-  onDisband,
+  dragOver,
 }: {
+  side: 'you' | 'opponent';
   caravan: RedactedCaravan;
   seat: Seat;
   index: number;
-  status: CaravanStatus;
-  targets: Map<TargetKey, Move>;
+  targets: ReadonlyMap<TargetKey, Move>;
   onTarget: (move: Move) => void;
-  canDisband: boolean;
-  onDisband?: (caravan: 0 | 1 | 2) => void;
+  dragOver: string | null;
 }) {
-  // The engine's derived helpers take a Caravan, and the redacted shape is one.
-  const value = caravanValue(caravan);
-  const direction = effectiveDirection(caravan);
-  const suit = effectiveSuit(caravan);
-  const appendMove = targets.get(caravanKey(seat, index));
   const departing = useDepartures(caravan);
+  const appendKey = caravanKey(seat, index);
+  const appendMove = targets.get(appendKey);
+
+  // Departing cards still occupy their old index, so they count towards how
+  // tightly the stack has to pack while they animate away.
+  const rows = Math.max(caravan.slots.length, ...departing.map((d) => d.index + 1), 0);
 
   return (
-    <div className={`caravan status-${status} ${appendMove ? 'open-target' : ''}`}>
-      <header>
-        <span className="value" title="Caravan value">
-          {value}
-        </span>
-        <span className="dir" title="Effective direction and suit">
-          {direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '—'}
-          {suit ? SUIT_GLYPH[suit] : ''}
-        </span>
-        {status !== 'building' && (
-          <span className="badge" title={BADGE_HELP[status]}>
-            {BADGE_TEXT[status]}
-          </span>
-        )}
-      </header>
-
+    <div
+      className={`caravan side-${side} ${appendMove ? 'open-target' : ''} ${
+        dragOver === appendKey ? 'drag-over' : ''
+      }`}
+      data-drop={appendKey}
+      // The whole caravan is the click target for an append: a number card needs
+      // no more precision than "this one".
+      onClick={() => appendMove && onTarget(appendMove)}
+      style={{ '--step': `calc(var(--card-h) * ${overlapStep(rows)})` } as never}
+    >
       <div className="stack">
         {caravan.slots.map((slot, si) => {
-          const move = targets.get(slotKey(seat, index, si));
+          const key = slotKey(seat, index, si);
+          const move = targets.get(key);
           return (
             <div className="slot" key={slot.card.id} style={{ '--i': si } as never}>
               <button
                 type="button"
-                className={`slot-card ${move ? 'target' : ''}`}
+                className={`slot-card ${move ? 'target' : ''} ${
+                  dragOver === key ? 'drag-over' : ''
+                }`}
+                data-drop={key}
                 disabled={!move}
                 title={move ? 'Play here' : undefined}
-                onClick={() => move && onTarget(move)}
+                onClick={(e) => {
+                  if (!move) return;
+                  // Otherwise this counts as a click on the caravan behind it
+                  // too, and appends instead of attaching here.
+                  e.stopPropagation();
+                  onTarget(move);
+                }}
               >
                 <PlayingCard card={slot.card} />
               </button>
               {slot.attached.length > 0 && (
                 <span className="attachments">
-                  {slot.attached.map((face) => (
-                    <AttachedCard key={face.id} card={face} />
+                  {slot.attached.map((face, ai) => (
+                    <span
+                      className="attached-card"
+                      key={face.id}
+                      style={{ '--ai': ai } as never}
+                    >
+                      <PlayingCard card={face} />
+                    </span>
                   ))}
                 </span>
               )}
@@ -342,31 +459,9 @@ function CaravanView({
         ))}
 
         {caravan.slots.length === 0 && departing.length === 0 && (
-          <span className="empty-slot">empty</span>
+          <span className="empty-slot" />
         )}
       </div>
-
-      <footer>
-        <button
-          type="button"
-          className={`drop ${appendMove ? 'target' : ''}`}
-          disabled={!appendMove}
-          onClick={() => appendMove && onTarget(appendMove)}
-        >
-          {appendMove ? 'play here' : ''}
-        </button>
-        {onDisband && (
-          <button
-            type="button"
-            className="disband"
-            disabled={!canDisband}
-            title="Discard this whole caravan. You do not draw a card."
-            onClick={() => onDisband(index as 0 | 1 | 2)}
-          >
-            disband
-          </button>
-        )}
-      </footer>
     </div>
   );
 }

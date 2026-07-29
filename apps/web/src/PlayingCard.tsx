@@ -112,16 +112,3 @@ export function PlayingCard({
   );
 }
 
-/** The compact form used for face cards stacked on a number card. */
-export function AttachedCard({ card }: { card: Card }) {
-  const glyph = card.suit ? GLYPH[card.suit] : '★';
-  return (
-    <span
-      className={`attached ${isJoker(card) ? 'joker' : suitColour(card)}`}
-      title={isJoker(card) ? 'Joker' : `${rankText(card)}${glyph}`}
-    >
-      {isJoker(card) ? 'JKR' : rankText(card)}
-      <em>{glyph}</em>
-    </span>
-  );
-}

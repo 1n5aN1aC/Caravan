@@ -3,7 +3,7 @@ import type { Card } from '@caravan/rules';
 import { useEffect, useRef, useState } from 'react';
 
 /** How long a destroyed card stays on the table sliding away. Matches the CSS. */
-export const DEPARTURE_MS = 420;
+export const DEPARTURE_MS = 700;
 
 export interface Departure {
   card: Card;

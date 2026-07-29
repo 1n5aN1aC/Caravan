@@ -1,8 +1,22 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactElement,
+} from 'react';
 import { Board } from './Board.js';
 import { CaravanClient } from './net.js';
 
-/** Landing page, board, and the connection chrome around both. */
+/**
+ * Landing page, board, and the connection chrome around both.
+ *
+ * Everything that is *about* the session rather than the game — title, code,
+ * seats, turn counter, errors, the leave button — is packed into one box that
+ * rides at the top of the hand column, so the table has the window's full width
+ * and height to itself.
+ */
 export function App() {
   const client = useMemo(() => new CaravanClient(), []);
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot);
@@ -14,15 +28,40 @@ export function App() {
   }, [client]);
 
   const seated = state.seat !== null;
+  const showBoard = state.match !== null && state.status !== 'ended';
+
+  // Handed to the Board so it can sit above the hand. With no board to host it —
+  // landing page, or a match that has ended — it stands on its own instead.
+  const panel = (
+    <section className="panel">
+      <h1>Caravan</h1>
+
+      {seated && (
+        <>
+          <span className="meta">
+            <span className="meta-label">Table</span>
+            <strong className="code">{state.code}</strong>
+          </span>
+          <Seats present={state.present} you={state.seat!} />
+          <Status state={state} />
+        </>
+      )}
+
+      <span className="spacer" />
+      <span className={`conn conn-${state.connectivity}`}>{state.connectivity}</span>
+      {seated && <button onClick={() => client.leave()}>Leave</button>}
+
+      {state.error && <p className="error">{state.error}</p>}
+    </section>
+  );
 
   return (
     <main>
-      <header>
-        <h1>Caravan</h1>
-        <span className={`conn conn-${state.connectivity}`}>{state.connectivity}</span>
-      </header>
-
-      {state.error && <p className="error">{state.error}</p>}
+      {showBoard ? (
+        <Board view={state.match!} onMove={(move) => client.play(move)} panel={panel} />
+      ) : (
+        panel
+      )}
 
       {!seated && (
         <section className="landing">
@@ -47,22 +86,6 @@ export function App() {
             </button>
           </form>
         </section>
-      )}
-
-      {seated && (
-        <section className="room">
-          <span>
-            Table <strong className="code">{state.code}</strong>
-          </span>
-          <Seats present={state.present} you={state.seat!} />
-          <Status state={state} />
-          <span className="spacer" />
-          <button onClick={() => client.leave()}>Leave</button>
-        </section>
-      )}
-
-      {state.match && state.status !== 'ended' && (
-        <Board view={state.match} onMove={(move) => client.play(move)} />
       )}
 
       {state.match?.result && <Result result={state.match.result} you={state.match.seat} />}
@@ -135,26 +158,41 @@ function Seats({ present, you }: { present: [boolean, boolean]; you: 0 | 1 }) {
   );
 }
 
+/**
+ * The one line that says where the session is up to. It carries its own label
+ * because that label changes with the state it is reporting — "Turn" is wrong
+ * for a match that has ended or has not started.
+ */
 function Status({ state }: { state: ReturnType<CaravanClient['getSnapshot']> }) {
   const countdown = useCountdown(state.reconnectDeadline);
 
-  if (state.status === 'ended') {
-    return <span className="status warn">Match ended: {state.endedReason}</span>;
-  }
-  if (state.status === 'waiting') {
-    return <span className="status">Share the code — waiting for an opponent</span>;
-  }
-  if (countdown !== null) {
-    return <span className="status warn">Opponent reconnecting… {countdown}s</span>;
-  }
-  if (state.match) {
-    return (
-      <span className="status">
-        {state.match.phase === 'opening' ? 'opening round' : `turn ${state.match.ply + 1}`}
-      </span>
-    );
-  }
-  return <span className="status">Seated</span>;
+  const [label, body] = ((): [string, ReactElement] => {
+    if (state.status === 'ended') {
+      return ['Ended', <span className="status warn">{state.endedReason}</span>];
+    }
+    if (state.status === 'waiting') {
+      return ['Waiting', <span className="status">Share the code for an opponent</span>];
+    }
+    if (countdown !== null) {
+      return ['Waiting', <span className="status warn">Reconnecting… {countdown}s</span>];
+    }
+    if (state.match) {
+      return [
+        'Turn',
+        <span className="status">
+          {state.match.phase === 'opening' ? 'opening round' : `turn ${state.match.ply + 1}`}
+        </span>,
+      ];
+    }
+    return ['Turn', <span className="status">seated</span>];
+  })();
+
+  return (
+    <span className="meta">
+      <span className="meta-label">{label}</span>
+      {body}
+    </span>
+  );
 }
 
 /** Seconds remaining until a deadline, or null when there is none. */
