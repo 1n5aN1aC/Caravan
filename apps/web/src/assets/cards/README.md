@@ -132,15 +132,16 @@ filling looks tighter:
 
 ## Licensing
 
-Card images are **not committed to this repository** — `.gitignore` keeps them
-local while this file stays tracked. Anyone cloning the repo gets the CSS-drawn
-faces and can drop in their own pack.
+The processed images in this folder **are committed**; the raw scans they were
+built from, in `/cards/`, are not. A clone therefore comes with the deck
+already installed, and dropping in a different pack still works the same way.
 
-The deck currently in use locally is the Fallout: New Vegas casino artwork
-(Tops, Gomorrah, Ultra-Luxe, Silver Rush, Atomic Wrangler, Bison Steve and
-Lucky 38 backs). That art is Bethesda's, which is fine for playing at home and
-not fine to redistribute — hence the ignore rule. If you ever want this repo to
-ship with artwork, use a public-domain deck and record it here:
+The deck in use is the Fallout: New Vegas casino artwork (Tops, Gomorrah,
+Ultra-Luxe, Silver Rush, Atomic Wrangler, Bison Steve and Lucky 38 backs).
+That art is Bethesda's and is included here on the owner's decision; it carries
+no licence granting redistribution. Anyone forking or republishing this
+repository should weigh that for themselves. If you want a version that is
+unambiguously free to pass on, use a public-domain deck and record it here.
 
 <!-- Source: -->
 <!-- Licence: -->

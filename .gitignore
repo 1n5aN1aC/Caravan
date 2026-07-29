@@ -3,9 +3,6 @@ dist/
 *.tsbuildinfo
 .DS_Store
 
-# Card artwork is third-party and not ours to redistribute, so the images stay
-# local while the instructions for supplying them stay tracked.
-# See apps/web/src/assets/cards/README.md
+# The raw scans the installed pack was built from. The processed images under
+# apps/web/src/assets/cards/ are tracked; these originals are not.
 /cards/
-apps/web/src/assets/cards/*
-!apps/web/src/assets/cards/README.md
