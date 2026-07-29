@@ -58,9 +58,9 @@ body {
 
 main {
   min-width: 0;
-  /* Only a sliver on the left: the hand is anchored to that edge and should very
-     nearly touch it. Blocks that are not the hand put the rest back themselves. */
-  padding: 1rem 1.5rem 3rem 0.5rem;
+  /* Even on both sides, so the board's own centring is not thrown off. Kept
+     tight because the fan wants nearly all the width it can get. */
+  padding: 1rem 0.75rem 3rem;
 }
 
 /* -- session panel ----------------------------------------------------- */
@@ -217,9 +217,10 @@ input {
 
 /* -- table ------------------------------------------------------------- */
 
-/* Panel over hand on the left, table hard right, all the slack between them.
-   The fan runs almost to the edge of the window — `main` keeps only a sliver of
-   left padding — so none of that width is spent keeping cards off the table. */
+/* Panel over hand on the left, table on the right, and the pair centred as one
+   block. Both columns are sized to their contents so the gap between them is
+   always the same 1.5rem — spare width collects outside the pair rather than
+   opening a hole between the hand and the caravans. */
 .board {
   display: grid;
   grid-template-columns: var(--fan-w) auto;
@@ -227,16 +228,18 @@ input {
     'panel table'
     'hand  table';
   grid-template-rows: auto auto;
-  justify-content: space-between;
+  justify-content: center;
   gap: 0.6rem 1.5rem;
   align-items: start;
 }
 
 .board > .panel { grid-area: panel; }
 .hand-area { grid-area: hand; }
-.table { grid-area: table; }
 
-.table { min-width: 0; }
+.table {
+  grid-area: table;
+  min-width: 0;
+}
 
 .table-head {
   display: flex;
@@ -371,7 +374,11 @@ img.facedown {
   border-radius: var(--radius);
   line-height: 0;
 }
-.slot-card:disabled { opacity: 1; }
+/* A card that is not itself a destination must not intercept the gesture: a
+   disabled button swallows a click outright, which would stop a number card
+   being played by clicking the pile it extends. Let both the click and the
+   drag's hit test reach the caravan behind it. */
+.slot-card:disabled { opacity: 1; pointer-events: none; }
 .slot-card.target .card,
 .hand-card.selected .card { box-shadow: 0 0 0 3px var(--gold), 0 6px 14px rgba(0, 0, 0, 0.5); }
 
@@ -384,8 +391,28 @@ img.facedown {
   filter: drop-shadow(0 0 2px var(--gold)) drop-shadow(0 0 7px var(--gold));
 }
 .slot-card.target { cursor: pointer; animation: pulse 2.2s ease-in-out infinite; }
-.slot-card.drag-over .card { box-shadow: 0 0 0 3px var(--gold), 0 6px 14px rgba(0, 0, 0, 0.5); }
-.slot-card.drag-over { animation: none; transform: scale(1.06); }
+
+/*
+ * The card a face card is about to land on. Cards in a caravan overlap by up to
+ * three quarters, so a ring drawn round the whole card would be mostly hidden
+ * behind the card above it — which is what made the target ambiguous. Lifting
+ * the slot clear of its neighbours is what actually identifies it; the ring and
+ * the scale only confirm it.
+ *
+ * The lift goes on the slot because `--i` gives each slot its own stacking
+ * context, and the slide goes on the button because the slot's transform
+ * belongs to the deal animation, whose `both` fill would overwrite it.
+ */
+.slot.drag-over { z-index: 60; }
+.slot-card.drag-over .card { box-shadow: 0 0 0 3px var(--gold), 0 8px 20px rgba(0, 0, 0, 0.6); }
+.slot-card.drag-over {
+  animation: none;
+  transition: transform 140ms ease;
+}
+/* Slid away from where the face card will land, so it opens up the space the
+   incoming card is about to occupy rather than moving into it. */
+.side-you .slot-card.drag-over { transform: translateX(-30%) scale(1.06); }
+.side-opponent .slot-card.drag-over { transform: translateX(30%) scale(1.06); }
 
 @keyframes pulse {
   0%, 100% { filter: brightness(1); }
@@ -678,11 +705,15 @@ img.facedown {
 
 /* The dragged card itself, following the pointer. Inert, so the hit test under
    the cursor finds the table beneath it rather than the card. */
+/* Hung off the pointer rather than centred under it. Centred, the card covered
+   the very thing it was being aimed at; trailing down and right leaves the
+   cursor and everything above and left of it — the caravan being aimed into —
+   in clear view. */
 .drag-ghost {
   position: fixed;
   z-index: 900;
   pointer-events: none;
-  transform: translate(-50%, -50%) rotate(-4deg) scale(1.06);
+  transform: translate(10%, 12%) rotate(-4deg) scale(1.06);
   filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.55));
 }
 .drag-ghost.over .card { box-shadow: 0 0 0 3px var(--gold); }
@@ -693,47 +724,56 @@ img.facedown {
 .board.dragging { cursor: grabbing; }
 
 
-/* -- result and log ---------------------------------------------------- */
+/* -- result ------------------------------------------------------------ */
 
-/* `main` gives up its left padding to the hand, so everything below the board
-   restores its own. */
+/*
+ * Laid over the middle of the table rather than tacked on below it, and kept
+ * translucent so the final board — which is the interesting part of a finished
+ * match — still reads through it. Inert, so it never stands between the player
+ * and the cards it is sitting on.
+ */
 .result {
-  margin-top: 1.25rem;
-  margin-left: 1rem;
-  padding: 1rem;
+  position: fixed;
+  left: 50%;
+  top: 45%;
+  z-index: 500;
+  pointer-events: none;
+  padding: 1.4rem 3rem;
   text-align: center;
-  font-size: 1.1rem;
-  letter-spacing: 0.18em;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  border-radius: 0.5rem;
-  background: rgba(0, 0, 0, 0.4);
-  border: 1px solid var(--gold);
+  border-radius: 0.6rem;
+  background: rgba(8, 20, 14, 0.55);
+  border: 1px solid rgba(227, 196, 106, 0.55);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
   color: var(--gold);
-  animation: deal 800ms ease both;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+  /* Its own keyframes, not `deal`: that one ends on `transform: none`, which
+     would throw away the centring translate below. */
+  animation: result-in 600ms ease both;
 }
-.result.lose { border-color: var(--danger); color: #f0b4b0; }
+.result.lose {
+  border-color: rgba(212, 87, 79, 0.6);
+  color: #f0b4b0;
+}
 
-.log {
-  margin-top: 1.5rem;
-  margin-left: 1rem;
-  font-size: 0.78rem;
-  color: var(--ink-dim);
+/* The reason, set small under the verdict rather than trailing after it. */
+.result .dim {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: inherit;
+  opacity: 0.75;
 }
-.log h2 {
-  font-size: 0.68rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  margin: 0 0 0.4rem;
+
+@keyframes result-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
-.log ol {
-  max-height: 11rem;
-  overflow-y: auto;
-  margin: 0;
-  padding: 0.5rem 0.5rem 0.5rem 1.6rem;
-  background: rgba(0, 0, 0, 0.25);
-  border-radius: var(--radius);
-}
-.log li { padding: 0.05rem 0; }
 
 .dim { color: var(--ink-dim); }
 
@@ -749,7 +789,6 @@ img.facedown {
     grid-template-rows: auto auto auto;
   }
   .hand-area { align-self: stretch; }
-  .table { justify-self: center; }
 }
 
 @media (max-width: 46rem) {
@@ -766,10 +805,7 @@ img.facedown {
   main { padding: 0.75rem; }
   .panel { max-width: none; }
   .meta-label { display: none; }
-  .result { margin-left: 0; }
-  /* A phone has no room to spare for a running commentary the board already
-     shows. The log is still rendered, so nothing else has to know it is gone. */
-  .log { display: none; }
+  .result { font-size: 1.4rem; padding: 1rem 1.6rem; letter-spacing: 0.16em; }
   .columns { gap: 0.4rem; }
   .hand { min-height: 11rem; }
   .track { font-size: 0.55rem; padding: 0.15rem 0.35rem; }

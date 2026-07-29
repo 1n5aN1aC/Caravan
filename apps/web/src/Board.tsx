@@ -47,17 +47,24 @@ export function Board({
   view,
   onMove,
   panel,
+  frozen = false,
 }: {
   view: RedactedState;
   onMove: (move: Move) => void;
   /** Session chrome from App, hosted at the top of the hand column. */
   panel?: ReactNode;
+  /**
+   * The room is over, so the board is a record rather than a game. It stays on
+   * screen — a match abandoned mid-play has no `phase: 'over'` to detect it by,
+   * and without this the cards would still invite moves the room cannot accept.
+   */
+  frozen?: boolean;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
 
   const you = view.seat;
   const them: Seat = you === 0 ? 1 : 0;
-  const yourTurn = view.turn === you && view.phase !== 'over';
+  const yourTurn = view.turn === you && view.phase !== 'over' && !frozen;
   const hand = view.players[you].hand ?? [];
 
   // One hydration per snapshot, shared by legality, track and status queries.
@@ -200,7 +207,7 @@ export function Board({
         </p>
 
         <p className={`turn ${yourTurn ? 'yours' : ''}`}>
-          {view.phase === 'over'
+          {view.phase === 'over' || frozen
             ? 'Match over'
             : yourTurn
               ? view.phase === 'opening'
@@ -408,7 +415,14 @@ function CaravanView({
           const key = slotKey(seat, index, si);
           const move = targets.get(key);
           return (
-            <div className="slot" key={slot.card.id} style={{ '--i': si } as never}>
+            // The slot, not the button, carries the hover: `--i` makes each slot
+            // its own stacking context, so only the slot can lift clear of the
+            // cards overlapping it.
+            <div
+              className={`slot ${dragOver === key ? 'drag-over' : ''}`}
+              key={slot.card.id}
+              style={{ '--i': si } as never}
+            >
               <button
                 type="button"
                 className={`slot-card ${move ? 'target' : ''} ${

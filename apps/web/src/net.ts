@@ -1,5 +1,5 @@
 import { NET, type RedactedState, type ServerMessage } from '@caravan/protocol';
-import type { GameEvent, Move } from '@caravan/rules';
+import type { Move } from '@caravan/rules';
 
 export type Connectivity = 'connecting' | 'open' | 'closed';
 
@@ -11,7 +11,6 @@ export interface ClientState {
   present: [boolean, boolean];
   reconnectDeadline: number | null;
   match: RedactedState | null;
-  log: string[];
   error: string | null;
   endedReason: string | null;
 }
@@ -26,7 +25,6 @@ const initial: ClientState = {
   present: [false, false],
   reconnectDeadline: null,
   match: null,
-  log: [],
   error: null,
   endedReason: null,
 };
@@ -116,13 +114,10 @@ export class CaravanClient {
           reconnectDeadline: message.reconnectDeadline,
         });
       case 'state':
-        return this.patch({
-          match: message.state as RedactedState,
-          log: [
-            ...this.state.log,
-            ...(message.events as GameEvent[]).map(describeEvent).filter(Boolean),
-          ].slice(-100),
-        });
+        // `message.events` is deliberately ignored: the board renders from the
+        // snapshot alone, and card removals are animated by diffing consecutive
+        // snapshots (see useDepartures) rather than by reading events.
+        return this.patch({ match: message.state as RedactedState });
       case 'error':
         return this.patch({ error: message.message });
       case 'ended':
@@ -142,44 +137,5 @@ export class CaravanClient {
     if (this.retry !== null) window.clearTimeout(this.retry);
     if (this.heartbeat !== null) window.clearInterval(this.heartbeat);
     this.socket?.close();
-  }
-}
-
-/** Card ids look like "p0:10H"; the log only needs the printed face. */
-function pretty(cardId: string): string {
-  const face = cardId.split(':')[1] ?? cardId;
-  if (face.startsWith('JOKER')) return 'JKR';
-  const suit = { S: '♠', H: '♥', D: '♦', C: '♣' }[face.at(-1) ?? ''];
-  return suit ? `${face.slice(0, -1)}${suit}` : face;
-}
-
-function describeEvent(event: GameEvent): string {
-  switch (event.type) {
-    case 'deal':
-      return `P${event.seat} is dealt ${event.count}`;
-    case 'play':
-      return `P${event.seat} plays ${pretty(event.cardId)} → P${event.target.seat} caravan ${event.target.caravan + 1}`;
-    case 'discard':
-      return `P${event.seat} discards ${pretty(event.cardId)}`;
-    case 'disband':
-      return `P${event.seat} disbands caravan ${event.caravan + 1}`;
-    case 'draw':
-      return event.cardId === 'hidden'
-        ? `P${event.seat} draws`
-        : `P${event.seat} draws ${pretty(event.cardId)}`;
-    case 'destroy':
-      return event.cardIds.length === 0
-        ? ''
-        : `${event.cause}: ${event.cardIds.map(pretty).join(' ')} destroyed`;
-    case 'phase':
-      return `— ${event.phase} —`;
-    case 'turn':
-      return `P${event.seat} to move`;
-    case 'gameOver':
-      return event.result.kind === 'draw'
-        ? `draw (${event.result.reason})`
-        : `P${event.result.seat} wins (${event.result.reason})`;
-    case 'mulligan':
-      return '';
   }
 }

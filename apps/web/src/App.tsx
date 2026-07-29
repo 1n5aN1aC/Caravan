@@ -1,7 +1,6 @@
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
   type ReactElement,
@@ -28,10 +27,16 @@ export function App() {
   }, [client]);
 
   const seated = state.seat !== null;
-  const showBoard = state.match !== null && state.status !== 'ended';
+  // The final board is the record of how the match went, so it stays up once
+  // the room ends rather than being swapped out for a bare message — the result
+  // is laid over it. Ending the room only freezes the board; it does not remove
+  // it. Note the room reports "ended" on any disconnect after a decided match,
+  // not just on abandonment, so this is the common path and not an edge case.
+  const showBoard = state.match !== null;
+  const frozen = state.status === 'ended';
 
   // Handed to the Board so it can sit above the hand. With no board to host it —
-  // landing page, or a match that has ended — it stands on its own instead.
+  // the landing page — it stands on its own instead.
   const panel = (
     <section className="panel">
       <h1>Caravan</h1>
@@ -58,7 +63,12 @@ export function App() {
   return (
     <main>
       {showBoard ? (
-        <Board view={state.match!} onMove={(move) => client.play(move)} panel={panel} />
+        <Board
+          view={state.match!}
+          onMove={(move) => client.play(move)}
+          panel={panel}
+          frozen={frozen}
+        />
       ) : (
         panel
       )}
@@ -89,8 +99,6 @@ export function App() {
       )}
 
       {state.match?.result && <Result result={state.match.result} you={state.match.seat} />}
-
-      {state.log.length > 0 && <MoveLog log={state.log} />}
     </main>
   );
 }
@@ -115,32 +123,11 @@ function Result({
   return (
     <section className={`result ${lost ? 'lose' : ''}`}>
       {headline}
-      <small className="dim"> — {why}</small>
+      <small className="dim">{why}</small>
     </section>
   );
 }
 
-function MoveLog({ log }: { log: string[] }) {
-  const list = useRef<HTMLOListElement>(null);
-  // Scroll the log's own container rather than calling scrollIntoView on a row:
-  // that both avoids yanking the page around and keeps this effect from
-  // depending on a DOM API that may be missing. A throw here happens during
-  // commit and takes the whole board down with it.
-  useEffect(() => {
-    const element = list.current;
-    if (element) element.scrollTop = element.scrollHeight;
-  }, [log.length]);
-  return (
-    <section className="log">
-      <h2>Move log</h2>
-      <ol ref={list}>
-        {log.map((line, i) => (
-          <li key={i}>{line}</li>
-        ))}
-      </ol>
-    </section>
-  );
-}
 
 function Seats({ present, you }: { present: [boolean, boolean]; you: 0 | 1 }) {
   return (

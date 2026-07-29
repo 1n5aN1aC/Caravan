@@ -55,9 +55,19 @@ export function useCardDrag({
       // Guarded because jsdom and older engines may not implement it; a missing
       // hit test must degrade to "no target", never throw mid-gesture.
       const element = document.elementFromPoint?.(x, y);
-      const host = element?.closest?.('[data-drop]') as HTMLElement | null;
-      const key = host?.dataset.drop;
-      return key && isTarget(cardId, key) ? key : null;
+      // Drop targets nest: a card sits inside the caravan holding it. Walk out
+      // from the deepest one, so the most specific legal destination wins — a
+      // face card lands on the card under the pointer — but a card that is not
+      // itself a target falls through to the caravan behind it rather than
+      // reading as "nowhere to drop". Dropping a number card onto the pile it
+      // extends is the obvious gesture, and it has to mean "append here".
+      let host = element?.closest?.('[data-drop]') as HTMLElement | null;
+      while (host) {
+        const key = host.dataset.drop;
+        if (key && isTarget(cardId, key)) return key;
+        host = (host.parentElement?.closest?.('[data-drop]') ?? null) as HTMLElement | null;
+      }
+      return null;
     },
     [isTarget],
   );

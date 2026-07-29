@@ -94,7 +94,6 @@ describe('App', () => {
       );
 
       expect(container.querySelectorAll('.caravan')).toHaveLength(6);
-      expect(container.querySelector('.log')).not.toBeNull();
       expect(container.querySelectorAll('.hand .card').length).toBeGreaterThan(0);
     },
   );
