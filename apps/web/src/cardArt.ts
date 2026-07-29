@@ -1,22 +1,23 @@
 import { isJoker, type Card } from '@caravan/rules';
 
 /**
- * Optional card artwork. Drop image files into `src/assets/cards/` and they are
- * picked up automatically at build time — hashed, bundled, and matched to cards
- * by filename. Anything missing falls back to the CSS-drawn face, so a partial
- * set works fine and an empty folder changes nothing.
+ * Optional card artwork, picked up from `src/assets/cards/` at build time —
+ * bundled, content-hashed, and matched to cards by filename. Any card without
+ * an image falls back to the CSS-drawn face, so a partial set works fine and an
+ * empty folder changes nothing.
  *
- * Filenames are matched loosely, because every deck pack names things
- * differently. All of these resolve to the ace of spades:
+ * The folder is organised by what a file *is*, because the three kinds behave
+ * differently: there is exactly one face per card, at most two jokers, and any
+ * number of interchangeable backs.
  *
- *   AS.png   as.png   ace_of_spades.png   Ace-Of-Spades.jpg   spades_ace.webp
+ *   assets/cards/faces/AS.jpg      one per card, named <rank><suit>
+ *   assets/cards/jokers/joker1.jpg  joker2.jpg is optional
+ *   assets/cards/backs/tops.jpg     as many as you like; the name is the id
  *
- * Jokers: `joker.png`, or `red_joker.png` / `black_joker.png` (equivalently
- * `joker1` / `joker2`) to give the two jokers different faces.
- * A card back can be supplied as `back.png`.
+ * Loose filenames still work for packs that ship flat — see `parseArtPath`.
  */
 
-const modules = import.meta.glob('./assets/cards/*.{png,jpg,jpeg,webp,avif,svg}', {
+const modules = import.meta.glob('./assets/cards/**/*.{png,jpg,jpeg,webp,avif,svg}', {
   eager: true,
   query: '?url',
   import: 'default',
@@ -45,31 +46,41 @@ const SUIT_WORDS: Record<string, string> = {
   c: 'C', club: 'C', clubs: 'C',
 };
 
-/** Turns a filename into a canonical card key like "AS", or null if unrecognised. */
-export function keyFromFilename(path: string): string | null {
-  const base = path.split('/').pop()!.replace(/\.[^.]+$/, '').toLowerCase();
-  if (base === 'back') return 'BACK';
+export type ArtEntry =
+  | { kind: 'face'; key: string }
+  | { kind: 'joker'; key: 'JOKER1' | 'JOKER2' | 'JOKER' }
+  | { kind: 'back'; key: string };
 
-  if (base.includes('joker')) {
-    // Look at whatever surrounds the word, so "joker2" and "black_joker" both
-    // land, without single letters like "b" guessing on ambiguous names.
+/**
+ * Works out what an image file is from its path. The containing folder decides
+ * the kind where it can, so a back may be called anything at all; otherwise the
+ * filename is parsed, which keeps flat packs working.
+ */
+export function parseArtPath(path: string): ArtEntry | null {
+  const segments = path.split('/');
+  const folder = segments.at(-2)?.toLowerCase() ?? '';
+  const base = segments.at(-1)!.replace(/\.[^.]+$/, '').toLowerCase();
+
+  if (folder === 'backs') return { kind: 'back', key: base };
+  if (base === 'back') return { kind: 'back', key: 'default' };
+
+  if (folder === 'jokers' || base.includes('joker')) {
+    // "joker2", "black_joker" and "Joker 2" all mean the second joker.
     const qualifier = base.replace('joker', '');
-    if (/2|black/.test(qualifier)) return 'JOKER2';
-    if (/1|red/.test(qualifier)) return 'JOKER1';
-    return 'JOKER';
+    if (/2|black/.test(qualifier)) return { kind: 'joker', key: 'JOKER2' };
+    if (/1|red/.test(qualifier)) return { kind: 'joker', key: 'JOKER1' };
+    return { kind: 'joker', key: 'JOKER' };
   }
 
-  // Split on separators, dropping filler words like "of".
+  // Ranks and suits, in any of the spellings decks actually ship with:
+  // "AS", "as", "ace_of_spades", "Ace-Of-Spades", "spades_ace".
   const parts = base.split(/[^a-z0-9]+/).filter((p) => p && p !== 'of');
-
   let rank: string | undefined;
   let suit: string | undefined;
   for (const part of parts) {
     if (!rank && RANK_WORDS[part]) rank = RANK_WORDS[part];
     else if (!suit && SUIT_WORDS[part]) suit = SUIT_WORDS[part];
   }
-
-  // Compact forms with no separator at all: "as", "10h", "qd".
   if (!rank || !suit) {
     const compact = /^([atjqk]|10|[1-9])([shdc])$/.exec(parts.join(''));
     if (compact) {
@@ -78,41 +89,67 @@ export function keyFromFilename(path: string): string | null {
     }
   }
 
-  return rank && suit ? `${rank}${suit}` : null;
+  return rank && suit ? { kind: 'face', key: `${rank}${suit}` } : null;
 }
 
-const art = new Map<string, string>();
+const faces = new Map<string, string>();
+const jokers = new Map<string, string>();
+const backs = new Map<string, string>();
+
 for (const [path, url] of Object.entries(modules)) {
-  const key = keyFromFilename(path);
-  if (key) art.set(key, url);
+  const entry = parseArtPath(path);
+  if (!entry) continue;
+  if (entry.kind === 'face') faces.set(entry.key, url);
+  else if (entry.kind === 'joker') jokers.set(entry.key, url);
+  else backs.set(entry.key, url);
 }
 
 /** The image for a card, or null to fall back to the CSS-drawn face. */
 export function cardArtUrl(card: Card): string | null {
   if (isJoker(card)) {
-    // Card ids end in JOKER1 / JOKER2, so the two can differ if art exists.
+    // Card ids end in JOKER1 / JOKER2, so the two differ when art exists.
     const which = card.id.endsWith('2') ? 'JOKER2' : 'JOKER1';
-    return art.get(which) ?? art.get('JOKER') ?? null;
+    return jokers.get(which) ?? jokers.get('JOKER') ?? null;
   }
-  return art.get(`${card.rank}${card.suit}`) ?? null;
+  return faces.get(`${card.rank}${card.suit}`) ?? null;
 }
 
-export const cardBackUrl: string | null = art.get('BACK') ?? null;
+export interface CardBack {
+  /** Stable id, taken from the filename — e.g. "tops", "gomorrah". */
+  id: string;
+  url: string;
+}
 
-/** True once any artwork is present, so layout can adapt to real images. */
-export const hasCardArt = art.size > 0;
+/**
+ * Every available card back, in a stable order. Nothing picks between them yet:
+ * `cardBackUrl` is used everywhere a back is drawn today. This exists so that
+ * showing a different back per deck — or a random one — is a matter of choosing
+ * from this list rather than reorganising the assets.
+ */
+export const cardBacks: readonly CardBack[] = [...backs.entries()]
+  .map(([id, url]) => ({ id, url }))
+  .sort((a, b) => a.id.localeCompare(b.id));
 
-if (import.meta.env.DEV && art.size > 0) {
+/** The back drawn today, wherever one is needed. */
+export const cardBackUrl: string | null =
+  backs.get('tops') ?? cardBacks[0]?.url ?? null;
+
+export const hasCardArt = faces.size > 0 || jokers.size > 0;
+
+if (import.meta.env.DEV) {
   const wanted: string[] = [];
   for (const suit of ['S', 'H', 'D', 'C']) {
     for (const rank of ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']) {
       wanted.push(`${rank}${suit}`);
     }
   }
-  const missing = wanted.filter((key) => !art.has(key));
-  if (missing.length > 0) {
-    console.info(
-      `[card art] ${art.size} image(s) loaded; ${missing.length} card(s) will use the drawn face: ${missing.join(' ')}`,
-    );
+  const missing = wanted.filter((key) => !faces.has(key));
+  if (hasCardArt) {
+    const summary = `[card art] ${faces.size}/52 faces, ${jokers.size} joker(s), ${cardBacks.length} back(s)`;
+    if (missing.length > 0) {
+      console.info(`${summary} — drawn faces used for: ${missing.join(' ')}`);
+    } else {
+      console.info(`${summary} — complete`);
+    }
   }
 }

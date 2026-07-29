@@ -10,8 +10,9 @@ import { describe, expect, it, vi } from 'vitest';
 vi.mock('../src/cardArt.js', () => ({
   cardArtUrl: () => null,
   cardBackUrl: null,
+  cardBacks: [],
   hasCardArt: false,
-  keyFromFilename: () => null,
+  parseArtPath: () => null,
 }));
 
 const { PlayingCard } = await import('../src/PlayingCard.js');
