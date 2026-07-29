@@ -12,6 +12,7 @@ import {
   type Seat,
 } from '@caravan/rules';
 import { useMemo, useState } from 'react';
+import { cardBackUrl } from './cardArt.js';
 import { AttachedCard, PlayingCard } from './PlayingCard.js';
 import { useDepartures } from './useDepartures.js';
 
@@ -229,7 +230,11 @@ function PlayerRow({
         <span className="who">{name}</span>
         {handCount !== undefined && (
           <span className="pill">
-            <span className="facedown" aria-hidden="true" />
+            {cardBackUrl ? (
+              <img className="facedown" src={cardBackUrl} alt="" aria-hidden="true" />
+            ) : (
+              <span className="facedown" aria-hidden="true" />
+            )}
             {handCount} in hand
           </span>
         )}

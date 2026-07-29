@@ -72,6 +72,15 @@ pnpm demo -- --seed=hello --plies=40                    # play a match, print th
 pnpm --filter @caravan/rules stats -- --matches=300     # how random matches end
 ```
 
+### Card artwork
+
+Cards are drawn in CSS by default — no assets required. To use real card images,
+drop them into `apps/web/src/assets/cards/` and rebuild; they are matched by
+filename (`AS.png`, `ace_of_spades.png`, `10H.jpg`, `back.png`, …) and bundled
+automatically. Any card without an image keeps the drawn face, so a partial set
+works. See [that folder's README](apps/web/src/assets/cards/README.md) for the
+naming rules and licensing note.
+
 ### Terminology
 
 A caravan is **sold** only when it is in the sell range *and* strictly beating

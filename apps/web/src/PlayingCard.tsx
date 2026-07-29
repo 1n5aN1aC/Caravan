@@ -1,4 +1,5 @@
 import { isJoker, type Card, type Suit } from '@caravan/rules';
+import { cardArtUrl } from './cardArt.js';
 
 /**
  * A real card face: corner indices top-left and bottom-right, and a pip layout
@@ -37,6 +38,14 @@ const PIP_LAYOUT: Record<string, Array<[number, number]>> = {
   ],
 };
 
+/** Human-readable card name, used for alt text and tooltips. */
+export function cardName(card: Card): string {
+  if (isJoker(card)) return 'Joker';
+  const suits: Record<string, string> = { S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs' };
+  const ranks: Record<string, string> = { A: 'Ace', J: 'Jack', Q: 'Queen', K: 'King' };
+  return `${ranks[card.rank] ?? card.rank} of ${suits[card.suit!]}`;
+}
+
 export function PlayingCard({
   card,
   size = 'normal',
@@ -44,6 +53,16 @@ export function PlayingCard({
   card: Card;
   size?: 'normal' | 'small' | 'large';
 }) {
+  // Real artwork when it has been supplied; the drawn face otherwise.
+  const art = cardArtUrl(card);
+  if (art) {
+    return (
+      <span className={`card art size-${size}`} aria-label={cardName(card)}>
+        <img src={art} alt="" draggable={false} />
+      </span>
+    );
+  }
+
   if (isJoker(card)) {
     return (
       <span className={`card joker size-${size}`} aria-label="Joker">
@@ -58,10 +77,9 @@ export function PlayingCard({
   const glyph = GLYPH[suit];
   const rank = rankText(card);
   const pips = PIP_LAYOUT[card.rank];
-  const label = `${rank} of ${{ S: 'spades', H: 'hearts', D: 'diamonds', C: 'clubs' }[suit]}`;
 
   return (
-    <span className={`card ${suitColour(card)} size-${size}`} aria-label={label}>
+    <span className={`card ${suitColour(card)} size-${size}`} aria-label={cardName(card)}>
       <span className="corner tl">
         {rank}
         <em>{glyph}</em>

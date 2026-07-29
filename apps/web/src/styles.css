@@ -221,6 +221,7 @@ input {
   height: 1rem;
   border-radius: 2px;
   border: 1px solid #2b1a3a;
+  object-fit: cover;
   background:
     repeating-linear-gradient(45deg, #6a3fa0 0 3px, #52307d 3px 6px);
 }
@@ -361,6 +362,20 @@ input {
 .card.red { color: var(--red); }
 .card.black { color: var(--black); }
 .card.joker { color: #6a3fa0; }
+
+/* Supplied artwork. `contain` keeps whole faces visible even when the pack is
+   uncropped or an unusual aspect ratio; switch to `cover` for a tighter fit. */
+.card.art {
+  background: #fffdf8;
+  overflow: hidden;
+}
+.card.art img {
+  width: 100%;
+  height: 100%;
+  object-fit: var(--card-fit, contain);
+  display: block;
+  pointer-events: none;
+}
 
 .card .corner {
   position: absolute;
