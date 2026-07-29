@@ -1,0 +1,19 @@
+{
+  "name": "caravan",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.18.0",
+  "scripts": {
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "demo": "pnpm --filter @caravan/rules demo",
+    "dev:server": "pnpm --filter @caravan/server dev",
+    "dev:web": "pnpm --filter @caravan/web dev",
+    "build": "pnpm --filter @caravan/web build",
+    "start": "pnpm --filter @caravan/server start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5.7.2"
+  }
+}

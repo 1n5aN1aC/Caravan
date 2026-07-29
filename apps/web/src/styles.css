@@ -1,0 +1,246 @@
+/*
+ * Deliberately plain. All styling lives in this one file so a retro-terminal
+ * theme can replace it later without touching a single component.
+ */
+:root {
+  --fg: #e6e6e6;
+  --bg: #131313;
+  --dim: #8a8a8a;
+  --accent: #7fd67f;
+  --bad: #e07070;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid #333;
+  padding-bottom: 0.5rem;
+}
+
+h1 {
+  font-size: 1.2rem;
+  letter-spacing: 0.3em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.conn {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+.conn-open { color: var(--accent); }
+.conn-connecting { color: var(--dim); }
+.conn-closed { color: var(--bad); }
+
+button,
+input {
+  font: inherit;
+  background: #1e1e1e;
+  color: var(--fg);
+  border: 1px solid #444;
+  padding: 0.4rem 0.8rem;
+}
+
+button:hover { border-color: var(--accent); }
+
+input {
+  width: 6rem;
+  text-align: center;
+  letter-spacing: 0.4em;
+}
+
+.landing {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 2rem;
+}
+
+.code {
+  color: var(--accent);
+  letter-spacing: 0.3em;
+}
+
+.seats {
+  list-style: none;
+  padding: 0;
+}
+.seats .here { color: var(--accent); }
+.seats .away { color: var(--dim); }
+
+.status { border-left: 2px solid #444; padding-left: 0.8rem; }
+.counts,
+.note { color: var(--dim); font-size: 0.85rem; }
+.error { color: var(--bad); }
+
+/* -- board ------------------------------------------------------------- */
+
+main { max-width: 60rem; }
+
+.turn { color: var(--dim); }
+.turn.yours { color: var(--accent); }
+
+.row h2 {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin: 0.5rem 0 0.3rem;
+}
+
+.caravans {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.6rem;
+}
+
+.caravan {
+  border: 1px solid #333;
+  padding: 0.4rem;
+  min-height: 7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+/* Only the caravan actually winning its track reads as sold. */
+.caravan.status-sold { border-color: var(--accent); }
+.caravan.status-outbid { border-color: #6a5a2a; }
+.caravan.status-tied { border-color: #4a4a7a; }
+.caravan.status-overburdened { border-color: var(--bad); }
+
+.caravan header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  border: none;
+  padding: 0;
+}
+.caravan .value { font-size: 1.1rem; }
+.caravan .dir { color: var(--dim); }
+.badge { font-size: 0.65rem; cursor: help; }
+.status-sold .badge { color: var(--accent); }
+.status-outbid .badge { color: #c8a84a; }
+.status-tied .badge { color: #9a9ad0; }
+.status-overburdened .badge { color: var(--bad); }
+
+.slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+}
+.slots li {
+  display: flex;
+  gap: 0.2rem;
+  align-items: center;
+  margin-bottom: 0.15rem;
+}
+
+.card {
+  display: inline-block;
+  min-width: 2.6rem;
+  padding: 0.15rem 0.3rem;
+  text-align: center;
+  border: 1px solid #444;
+  background: #f2f2f2;
+  color: #111;
+}
+.card.red { color: #b02020; }
+.card.black { color: #111; }
+.card.joker { color: #6a3fa0; }
+.card.attached { background: #d8d8d8; font-size: 0.8rem; min-width: 2rem; }
+.card.selected { outline: 2px solid var(--accent); }
+.card:disabled { opacity: 1; cursor: default; }
+
+/* The single best teaching tool for the placement rules: only legal
+   destinations light up. */
+.target,
+.drop.target {
+  outline: 2px solid var(--accent);
+  cursor: pointer;
+}
+
+.drop {
+  font-size: 0.7rem;
+  color: var(--dim);
+  background: transparent;
+  border: 1px dashed #3a3a3a;
+  padding: 0.2rem;
+}
+.drop:disabled { border-color: #262626; }
+
+.disband {
+  font-size: 0.7rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.tracks {
+  display: flex;
+  gap: 1.5rem;
+  list-style: none;
+  padding: 0.4rem 0;
+  margin: 0.4rem 0;
+  color: var(--dim);
+  font-size: 0.8rem;
+  border-top: 1px solid #2a2a2a;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #333;
+}
+
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin-top: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.result {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  border: 1px solid var(--accent);
+  text-align: center;
+  letter-spacing: 0.1em;
+}
+
+.log {
+  margin-top: 1.5rem;
+  font-size: 0.8rem;
+  color: var(--dim);
+}
+.log h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; }
+.log ol {
+  max-height: 12rem;
+  overflow-y: auto;
+  padding-left: 1.4rem;
+  margin: 0;
+}
+
+.dim { color: var(--dim); }
+
+@media (max-width: 40rem) {
+  .caravans { grid-template-columns: 1fr; }
+}

@@ -1,0 +1,552 @@
+# Caravan — Multiplayer Web Implementation
+
+
+
+## Context
+
+
+
+Caravan is the in-fiction card game from *Fallout: New Vegas*. It has no faithful,
+
+playable multiplayer version on the web, and its rules are notoriously badly
+
+explained — the wikis, guides, and the shipped game itself disagree on several
+
+points. The goal is a self-hosted, browser-based, real-time 1v1 Caravan that is
+
+**rules-correct first**: a trustworthy engine you can point at and say "that's how
+
+it actually works," wrapped in the minimum UI needed to play it.
+
+
+
+`C:\Users\joshua\Desktop\Caravan` is currently empty. This is greenfield.
+
+
+
+v1 target: run the server on a machine, share a room code over LAN, two people
+
+play a complete, correct match in their browsers. Nothing else.
+
+
+
+**Deliberately out of scope for v1:** accounts, deck building, AI opponents,
+
+matchmaking, ranking, chat/emotes, spectators, rematch, animation, persistence
+
+across restarts, public hosting. Each is discussed under "Designed-for extensions."
+
+
+
+---
+
+
+
+## The Ruleset (authoritative — this is the spec)
+
+
+
+Sources conflict; every conflict below was resolved as a deliberate decision.
+
+Base ruleset is **FNV-faithful with known bugs excluded**.
+
+
+
+### Setup
+
+- Exactly 2 players. Each has **3 caravan tracks**, facing the opponent's 1-v-1, 2-v-2, 3-v-3.
+
+- Each player gets their **own standard 54-card deck** (52 + 2 Jokers), shuffled with a seeded PRNG.
+
+- Opening hand: **8 cards**. First player chosen at random.
+
+- **Auto-mulligan:** if a dealt hand contains fewer than 3 number cards (A–10), that
+
+  player's deck is silently reshuffled and redealt. Repeat until legal. Invisible to
+
+  both players. (~34% of hands trigger this, so it will fire often.)
+
+
+
+### Opening round
+
+- 3 alternating turns each. Each turn places **one number card (A–10) onto one of your
+
+  own empty caravans**.
+
+- No face cards, no discarding, no disbanding, no drawing during the opening round.
+
+  (This excludes the FNV opening-discard bug.)
+
+- Hands settle at 5 after the opening.
+
+
+
+### Turn actions (after opening) — choose exactly one
+
+1. **Play a card** from hand → then draw 1 (if deck non-empty).
+
+2. **Discard a card** from hand → then draw 1 (if deck non-empty).
+
+3. **Disband** one of your own caravans that has ≥1 card → **no draw**.
+
+
+
+Invariant: you draw exactly when you spent a card. Hand size is 5 while your deck holds cards.
+
+
+
+### Number card placement
+
+- Number cards go on **your own caravans only**. Ace = 1.
+
+- Onto an **empty** caravan: any number card.
+
+- **Equal rank is always illegal** — checked *before* direction/suit. A card whose rank
+
+  equals the current top card's rank is never playable, regardless of suit or Queens.
+
+- Onto a caravan with **1 card**: any number card of a different rank.
+
+- Onto a caravan with **2+ cards**: must either
+
+  - continue the caravan's **effective direction**, or
+
+  - match the caravan's **effective suit** (this bypasses direction entirely).
+
+- Values need not be adjacent — 3 → 7 is a valid ascending step.
+
+
+
+### Derived caravan state (never stored — always computed)
+
+- **Base direction** = comparison of the **two most recent number cards**. Recomputed
+
+  after every change, so a legal off-direction same-suit play flips the direction, and
+
+  a Jack removing a top card restores the prior direction automatically.
+
+- **Effective direction** = base direction, flipped once per Queen attached to the
+
+  **current top number card** (two Queens cancel).
+
+- **Effective suit** = the top number card's printed suit, overridden by the most recent
+
+  Queen attached to **that card**.
+
+- Queens only ever govern plays onto the card they sit on. Once a new number card lands
+
+  on top, the old card's Queens stop mattering. Queen state is local, not caravan-wide.
+
+- **Value** = sum of number card values, each doubled once per King attached to it
+
+  (Kings compound: 9 + 2 Kings = 36). Direction and suit comparisons use the card's
+
+  **printed rank and suit** — Kings never affect them.
+
+
+
+### Face cards
+
+- Playable on **any number card on the table**, yours or your opponent's.
+
+- **Max 3 face cards attached to one number card** (named config constant).
+
+- Face cards cannot be played on an empty caravan or attached to another face card.
+
+
+
+| Card | Effect |
+
+|---|---|
+
+| **Jack** | Destroys the number card it's played on, plus that card's attached face cards. Cards below remain; direction recomputes. |
+
+| **Queen** | Reverses direction and overrides suit — scoped to the card she sits on (see above). |
+
+| **King** | Doubles the current (already-modified) value of the card it sits on. Stacks. |
+
+| **Joker on an Ace** | Destroys every other **number card of that suit** anywhere on the table (all 6 caravans, both players), along with their attached face cards. |
+
+| **Joker on a 2–10** | Destroys every other **card of that rank** anywhere on the table, along with their attached face cards. |
+
+
+
+Joker notes: the target card survives and the Joker stays attached to it. Hands and
+
+decks are never touched. Board-wide reach is intentional — it's what makes Jokers matter.
+
+
+
+### Selling and winning
+
+- A caravan **sells** at **21–26 inclusive**.
+
+- **Overburdened (>26):** the caravan stays on the table and remains fully playable —
+
+  a Jack or Joker can bring it back under 26 and rescue it. It simply never sells.
+
+  Clearing it is a **voluntary disband**, never automatic. (Rejects game8's "auto-discard".)
+
+- A **track is decided** when at least one of its two caravans is sold AND strictly beats
+
+  the other. An unsold caravan always loses to a sold one. Two sold caravans of **equal
+
+  value are a tie** → track undecided.
+
+- **The match ends only when all three tracks are simultaneously decided.** Whoever holds
+
+  2+ wins. (With 3 tracks and no ties permitted at resolution, someone always has 2+.)
+
+  This is why you can't sell two and coast — you must break the third.
+
+- Evaluated after every move.
+
+
+
+### Exhaustion and stalemate
+
+- Empty deck → no draw; hand shrinks. Play continues.
+
+- A player with **no legal action** (cannot play any card, has no cards to discard, and
+
+  has no caravan to disband) **loses**.
+
+- **Hard turn cap** (config constant, e.g. 300 plies) as a backstop against a pathological
+
+  non-terminating match. Resolves as a draw.
+
+
+
+---
+
+
+
+## Architecture
+
+
+
+**pnpm monorepo, TypeScript everywhere.**
+
+packages/rules/     Pure rules engine. Zero I/O. No framework. Injected seeded PRNG.
+packages/protocol/  Wire message types + Zod schemas. Shared by server and web.
+apps/server/        Node + `ws`. Authoritative. Serves built client on the same origin.
+apps/web/           React + Vite. Thin renderer + local legality highlighting.
+
+`packages/rules` is the centerpiece and gets built and trusted **first**. It is imported
+
+by the server as the authority, and by the client purely to compute legal move
+
+highlighting without a round-trip. Rules logic is written and tested exactly once.
+
+
+
+### Authority
+
+Fully **server-authoritative**. The server owns deck order, both hands, and all state.
+
+Clients send *intents* (`{play, cardId, target}`) and receive only what that seat may see.
+
+Client-side rules are advisory UI only; the server independently re-validates every move
+
+and a rejected intent triggers a snapshot resync.
+
+
+
+### Transport
+
+Plain WebSocket (`ws`) with a hand-rolled discriminated-union protocol (~12 message types)
+
+validated by Zod at both ends. Shared TS types mean the compiler catches protocol drift.
+
+Heartbeat + reconnect hand-written (~50 lines).
+
+
+
+### Sync model
+
+**Redacted full-state snapshot + event log.** Full state is tiny (6 caravans of ≤10 cards,
+
+two 5-card hands), so every turn each player receives a complete snapshot with the
+
+opponent's hand reduced to a count and both decks reduced to counts, plus the list of
+
+events since the last snapshot (for the move log, and for animation later). Desync is
+
+structurally impossible and reconnect resync is free.
+
+
+
+**Redaction is a single choke-point function** — `redactFor(seat, state)` — and it is the
+
+only path by which state reaches the wire. Nothing else may serialize a match.
+
+
+
+### Match lifecycle
+
+- **Store:** `Map<roomCode, Match>` in one Node process, behind a `MatchStore` interface
+
+  so Redis is a one-file swap later. Server restart kills in-flight matches — accepted.
+
+- **Rooms:** host creates → 4-letter code → second player joins → match begins. Third
+
+  joiner rejected.
+
+- **Seats:** on join, server issues an **HMAC-signed seat token** stored in `localStorage`.
+
+  Reconnecting with it restores the seat and re-sends a full snapshot. Tab refresh is a
+
+  non-event.
+
+- **Disconnect:** opponent sees "Opponent reconnecting…" with a **90s countdown**. After
+
+  90s the match ends as *abandoned* (no loss — there's no rating).
+
+- **Turn timers:** none. State carries a nullable `turnDeadline` field so a timer is a
+
+  config flip later.
+
+- **Idle sweep:** rooms with no activity for **10 minutes** are garbage-collected.
+
+- **Game over:** result screen → both players return to the landing page. No rematch;
+
+  the room is destroyed.
+
+
+
+### Determinism
+
+The engine takes an **injected seeded PRNG** — it is the only source of randomness, and
+
+`Math.random()` must never appear in `packages/rules`. Every match records its seed and
+
+ordered move list, which makes any match deterministically replayable.
+
+
+
+---
+
+
+
+## UI (v1: minimal, unstyled)
+
+
+
+Functional layout only — boxes, text, Unicode suit glyphs. No theming, no animation.
+
+Purpose is to make the rules provable and playable as fast as possible.
+
+
+
+- **Interaction:** click-to-select, then click a target. Selecting a card in hand asks the
+
+  shared rules engine for **every legal destination**, and those targets highlight.
+
+  Identical on desktop and touch, keyboard-navigable, and the highlighting is the single
+
+  best teaching tool for Caravan's confusing placement rules.
+
+- **Board:** opponent's 3 caravans across the top, yours across the bottom, paired by
+
+  track. Each caravan shows its cards, attached face cards, current value, effective
+
+  direction and suit, and a sold/overburdened badge.
+
+- **Hand:** your 5 cards; opponent shown as a count. Deck counts shown for both.
+
+- **Move log:** plain text list driven by the event stream.
+
+- Style layer is kept in one place so a retro-terminal theme (amber/green phosphor,
+
+  scanlines, monospace, CSS-drawn card faces) can be applied later without touching
+
+  component structure.
+
+
+
+---
+
+
+
+## Correctness strategy
+
+
+
+Caravan's bugs live in **rule interactions** (Queen + suit exception + Jack + recomputed
+
+direction), not in individual functions. Three layers:
+
+
+
+1. **Unit tests** (Vitest) per rule in `packages/rules`.
+
+2. **Scenario fixtures** — a plain-text DSL where a file states a board, a move, and the
+
+   expected result. Every edge case resolved above becomes one readable fixture file.
+
+   Explicit fixtures required for: equal-rank rejection under a Queen-changed suit;
+
+   direction flipping after an off-direction same-suit play; Jack on the top card
+
+   restoring prior direction; Queen parity cancellation; King compounding; Joker-on-Ace
+
+   vs Joker-on-number blast radius across all six caravans; the 3-face-card cap;
+
+   overburdened caravan rescued back under 26; tie leaving a track undecided; match
+
+   ending only when all three tracks decide.
+
+3. **Property tests** asserting invariants: card conservation (every card is in exactly
+
+   one of deck/hand/board/discard), hand ≤ 5, hand == 5 while deck non-empty, direction
+
+   always derivable, value always recomputable from the board.
+
+
+
+**Seeded match replay** is the debugging tool: seed + move list reproduces any match
+
+exactly, so "it did something weird" converts directly into a new fixture.
+
+
+
+---
+
+
+
+## Build order
+
+
+
+Each phase is independently verifiable.
+
+
+
+1. **Rules engine core** — card/state types, immutable state, seeded PRNG, deal +
+
+   auto-mulligan, opening round, number card legality (rank/direction/suit), derived
+
+   direction/suit/value. Unit tests + first fixtures.
+
+2. **Face cards** — Jack, Queen, King, Joker with full targeting rules and the 3-card cap.
+
+   This is the hardest part of the engine; fixture coverage here is the priority.
+
+3. **Win/loss resolution** — selling, ties, track decision, all-three-decided end
+
+   condition, disband, exhaustion, no-legal-move loss, turn cap. Property tests.
+
+   *Engine is now complete and trusted before any networking or UI exists.*
+
+4. **Protocol + server** — `packages/protocol` message types and Zod schemas, `ws` server,
+
+   `MatchStore`, room codes, seat tokens, `redactFor`, move validation, snapshot broadcast,
+
+   reconnect grace, idle sweep, replay recording.
+
+5. **Web client** — landing page (create/join), board rendering, click-to-select
+
+   interaction with legal-target highlighting via the shared engine, move log, connection
+
+   status, game-over screen.
+
+6. **End-to-end play** — two browsers on LAN, full match. Fix what surfaces; every bug
+
+   becomes a fixture.
+
+
+
+---
+
+
+
+## Verification
+
+
+
+- `pnpm test` — unit, fixture, and property suites in `packages/rules` all green.
+
+- Fixture coverage explicitly asserted for each edge case listed in "Correctness strategy".
+
+- Server smoke: start server, create a room, join from a second client, play a scripted
+
+  move list, assert the expected winner.
+
+- Manual end-to-end: run the server, open two browser tabs (and a second machine on LAN),
+
+  play a complete match to a decided result.
+
+- Reconnect: mid-match, kill one tab's network / refresh it, confirm the seat restores
+
+  from `localStorage` and the board is intact. Confirm the 90s expiry ends the match cleanly.
+
+- Rejection path: send a hand-crafted illegal intent over the socket and confirm the
+
+  server rejects it and resyncs rather than applying it.
+
+- Redaction: inspect raw socket frames and confirm the opponent's hand contents and deck
+
+  order never appear.
+
+- Determinism: replay a recorded seed + move list and confirm an identical final state.
+
+
+
+---
+
+
+
+## Designed-for extensions (not built in v1)
+
+
+
+The v1 structure deliberately accommodates these without rework:
+
+
+
+- **Deck building** — deck construction is already abstracted behind a source interface;
+
+  per-player custom decks (FNV: min 30 cards, no duplicate of the same card from the same
+
+  set) drop in without touching game logic.
+
+- **Retro-terminal theme** — isolated style layer.
+
+- **Animation** — the event log already carries everything needed to animate.
+
+- **Turn timers** — nullable `turnDeadline` field already in state.
+
+- **Redis / multi-process** — `MatchStore` interface.
+
+- **Rule variants** — ruleset constants (face-card cap, sell range, hand size, turn cap)
+
+  are named config, not literals.
+
+- **AI opponent, accounts, matchmaking, spectators, rematch** — additive; none require
+
+  changing the engine or the authority model.
+
+
+
+---
+
+
+
+## Open risk
+
+
+
+The rules resolutions above are reconstructed from sources that genuinely disagree, and
+
+the two most authoritative (fallout.fandom.com and fallout.wiki) block automated access —
+
+their content came via search snippets, not full pages. The largest remaining uncertainty
+
+is **whether FNV recomputes direction from the top two cards or locks it on the first two**
+
+(we chose recompute). If play testing suggests otherwise, that is a localized change to
+
+one derived-state function plus its fixtures, precisely because direction is derived and
+
+never stored.
