@@ -2,7 +2,3 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
-
-# The raw scans the installed pack was built from. The processed images under
-# apps/web/src/assets/cards/ are tracked; these originals are not.
-/cards/

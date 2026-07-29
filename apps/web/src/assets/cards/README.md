@@ -45,8 +45,10 @@ gives them two, and a lone `back.png` is taken as a single back.
 Packs usually ship as full-resolution scans named `A Spades.jpg`. Those work
 as-is, but they are typically ~10x larger than needed — a card renders at about
 70px wide, so a 750px scan is wasted bandwidth. This sorts them into the layout
-above and downscales in one pass (run from the repo root, pack in `cards/`). Run
-the cut-out step below afterwards — this one writes plain JPEGs:
+above and downscales in one pass. Put the pack in a `cards/` folder at the repo
+root and run this from there; that folder is scratch space and can be deleted
+once the images have been imported. Run the cut-out step below afterwards — this
+one writes plain JPEGs:
 
 ```powershell
 Add-Type -AssemblyName System.Drawing
@@ -132,9 +134,8 @@ filling looks tighter:
 
 ## Licensing
 
-The processed images in this folder **are committed**; the raw scans they were
-built from, in `/cards/`, are not. A clone therefore comes with the deck
-already installed, and dropping in a different pack still works the same way.
+The processed images in this folder **are committed**, so a clone comes with the
+deck already installed. Dropping in a different pack still works the same way.
 
 The deck in use is the Fallout: New Vegas casino artwork (Tops, Gomorrah,
 Ultra-Luxe, Silver Rush, Atomic Wrangler, Bison Steve and Lucky 38 backs).
