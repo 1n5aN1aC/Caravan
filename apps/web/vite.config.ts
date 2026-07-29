@@ -8,7 +8,7 @@ export default defineConfig({
   build: { sourcemap: true },
   test: { environment: 'jsdom' },
   server: {
-    host: true, // reachable from other machines on the LAN
+    host: '0.0.0.0', // reachable from other machines on the LAN
     port: 5173,
     // In dev the client and server are separate origins; proxy the socket so
     // the client can always just talk to its own origin.

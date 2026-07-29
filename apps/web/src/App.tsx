@@ -26,7 +26,8 @@ export function App() {
 
       {!seated && (
         <section className="landing">
-          <button onClick={() => client.createRoom()}>Create room</button>
+          <button onClick={() => client.createRoom()}>Create a table</button>
+          <span className="or">or join one</span>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -38,21 +39,24 @@ export function App() {
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               placeholder="CODE"
               maxLength={4}
+              autoFocus
               aria-label="Room code"
             />
-            <button type="submit">Join</button>
+            <button type="submit" disabled={code.trim().length !== 4}>
+              Join
+            </button>
           </form>
         </section>
       )}
 
       {seated && (
         <section className="room">
-          <p>
-            Room <strong className="code">{state.code}</strong> — you are{' '}
-            <strong>player {state.seat}</strong>
-          </p>
+          <span>
+            Table <strong className="code">{state.code}</strong>
+          </span>
           <Seats present={state.present} you={state.seat!} />
           <Status state={state} />
+          <span className="spacer" />
           <button onClick={() => client.leave()}>Leave</button>
         </section>
       )}
@@ -76,13 +80,21 @@ function Result({
   you: 0 | 1;
 }) {
   if (!result) return null;
-  const text =
+  const lost = result.kind === 'winner' && result.seat !== you;
+  const why =
     result.kind === 'draw'
-      ? `Draw — ${result.reason}`
-      : result.seat === you
-        ? `You win — ${result.reason}`
-        : `You lose — ${result.reason}`;
-  return <section className="result">{text}</section>;
+      ? 'the turn limit was reached'
+      : result.reason === 'tracks'
+        ? 'all three tracks are decided'
+        : 'a player ran out of legal moves';
+  const headline =
+    result.kind === 'draw' ? 'Draw' : result.seat === you ? 'You win' : 'You lose';
+  return (
+    <section className={`result ${lost ? 'lose' : ''}`}>
+      {headline}
+      <small className="dim"> — {why}</small>
+    </section>
+  );
 }
 
 function MoveLog({ log }: { log: string[] }) {
@@ -111,9 +123,12 @@ function Seats({ present, you }: { present: [boolean, boolean]; you: 0 | 1 }) {
   return (
     <ul className="seats">
       {[0, 1].map((seat) => (
-        <li key={seat} className={present[seat] ? 'here' : 'away'}>
-          Player {seat}
-          {seat === you ? ' (you)' : ''} — {present[seat] ? 'connected' : 'waiting'}
+        <li
+          key={seat}
+          className={present[seat] ? 'here' : 'away'}
+          title={present[seat] ? 'Connected' : 'Not connected'}
+        >
+          {seat === you ? 'you' : 'opponent'}
         </li>
       ))}
     </ul>
@@ -124,22 +139,22 @@ function Status({ state }: { state: ReturnType<CaravanClient['getSnapshot']> }) 
   const countdown = useCountdown(state.reconnectDeadline);
 
   if (state.status === 'ended') {
-    return <p className="status">Match ended: {state.endedReason}.</p>;
+    return <span className="status warn">Match ended: {state.endedReason}</span>;
   }
   if (state.status === 'waiting') {
-    return <p className="status">Share the code — waiting for an opponent.</p>;
+    return <span className="status">Share the code — waiting for an opponent</span>;
   }
   if (countdown !== null) {
-    return <p className="status">Opponent reconnecting… {countdown}s</p>;
+    return <span className="status warn">Opponent reconnecting… {countdown}s</span>;
   }
   if (state.match) {
     return (
-      <p className="counts">
-        {state.match.phase} phase · ply {state.match.ply}
-      </p>
+      <span className="status">
+        {state.match.phase === 'opening' ? 'opening round' : `turn ${state.match.ply + 1}`}
+      </span>
     );
   }
-  return <p className="status">Seated.</p>;
+  return <span className="status">Seated</span>;
 }
 
 /** Seconds remaining until a deadline, or null when there is none. */
