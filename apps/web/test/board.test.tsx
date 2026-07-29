@@ -3,12 +3,14 @@ import {
   applyMove,
   createMatch,
   listLegalMoves,
+  scenario,
   type MatchState,
   type Seat,
 } from '@caravan/rules';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Board } from '../src/Board.js';
+import { DEPARTURE_MS } from '../src/useDepartures.js';
 
 /** Advances until it is `seat`'s turn, then returns the state. */
 function until(seat: Seat, start: MatchState): MatchState {
@@ -37,6 +39,41 @@ describe('Board', () => {
     );
     rerender(<Board view={redactFor(seat, after)} onMove={() => {}} />);
     expect(container.querySelectorAll('.caravan')).toHaveLength(6);
+  });
+
+  it('draws a real card face with corner indices and pips', () => {
+    const state = scenario({ p0: { caravans: ['7H', '', ''], hand: '' } });
+    const { container } = render(<Board view={redactFor(0, state)} onMove={() => {}} />);
+    const card = container.querySelector('.card')!;
+    expect(card.getAttribute('aria-label')).toBe('7 of hearts');
+    expect(card.classList.contains('red')).toBe(true);
+    expect(card.querySelectorAll('.corner')).toHaveLength(2);
+    expect(card.querySelectorAll('.pip')).toHaveLength(7);
+  });
+
+  it('keeps a destroyed card on the table long enough to animate it away', async () => {
+    const before = scenario({ p0: { caravans: ['3H,7S', '', ''], hand: 'JD' } });
+    const jack = before.players[0].hand[0]!;
+    const after = applyMove(before, 0, {
+      type: 'play',
+      cardId: jack.id,
+      target: { seat: 0, caravan: 0, slot: 1 },
+    }).state;
+
+    const { rerender, container } = render(
+      <Board view={redactFor(0, before)} onMove={() => {}} />,
+    );
+    expect(container.querySelectorAll('.slot')).toHaveLength(2);
+
+    rerender(<Board view={redactFor(0, after)} onMove={() => {}} />);
+    // The 7 is gone from the caravan but still on screen, on its way out.
+    expect(container.querySelectorAll('.slot.departing')).toHaveLength(1);
+
+    await waitFor(
+      () => expect(container.querySelectorAll('.slot.departing')).toHaveLength(0),
+      { timeout: DEPARTURE_MS * 3 },
+    );
+    expect(container.querySelectorAll('.slot')).toHaveLength(1);
   });
 
   it.each([0, 1] as Seat[])('renders seat %i mid-match with face cards on the table', (seat) => {
