@@ -45,7 +45,8 @@ gives them two, and a lone `back.png` is taken as a single back.
 Packs usually ship as full-resolution scans named `A Spades.jpg`. Those work
 as-is, but they are typically ~10x larger than needed — a card renders at about
 70px wide, so a 750px scan is wasted bandwidth. This sorts them into the layout
-above and downscales in one pass (run from the repo root, pack in `cards/`):
+above and downscales in one pass (run from the repo root, pack in `cards/`). Run
+the cut-out step below afterwards — this one writes plain JPEGs:
 
 ```powershell
 Add-Type -AssemblyName System.Drawing
@@ -80,14 +81,53 @@ Get-ChildItem "$src/*.jpg" | % {
 }
 ```
 
+## Cutting out the background
+
+Scans usually have the card floating on a sheet of white. Backs are shown at an
+angle in the deck, so that white reads as a hard rectangle behind a card with
+rounded corners. This clears it:
+
+```powershell
+pwsh scripts/cut-out-card-backs.ps1
+```
+
+It writes `.png` beside each `.jpg` and removes the original, so the loader does
+not see the same card twice. The white is removed by flood-filling inwards from
+the image border, which means only background *connected to the edge* goes —
+white inside the artwork is left alone. That matters for faces, where the card
+stock is aged cream sitting on a white sheet with only a few pixels between them.
+Pass `-KeepSource` to keep the JPEGs.
+
+Despite the name it takes a `-Source`, so run it once per folder:
+
+```powershell
+pwsh scripts/cut-out-card-backs.ps1 -Source apps/web/src/assets/cards/faces
+pwsh scripts/cut-out-card-backs.ps1 -Source apps/web/src/assets/cards/jokers
+```
+
+Alpha costs about 10x the JPEG size, so follow up with a palette pass — 256
+colours is not a visible ceiling on art this aged at this size, and it wins back
+roughly 70%:
+
+```bash
+node scripts/optimise-card-art.mjs apps/web/src/assets/cards/faces apps/web/src/assets/cards/jokers apps/web/src/assets/cards/backs
+```
+
+That one needs `sharp` available; `--dry` reports what it would save.
+
 ## Fitting
 
-Images fill the card (`object-fit: cover`), which suits scans whose aspect ratio
-already matches. To letterbox an odd-sized pack instead, set this in
-`styles.css`:
+Images are fitted whole (`object-fit: contain`), so cut-out artwork never has
+its own rounded corners clipped. When art is present the card wrapper draws
+nothing of its own — no background, border or box shadow — because the image
+carries the card's shape; depth comes from a drop-shadow that follows the alpha.
+That means transparent PNGs sit on the felt correctly.
+
+For full-bleed rectangular scans that already match the card's aspect ratio,
+filling looks tighter:
 
 ```css
-:root { --card-fit: contain; }
+:root { --card-fit: cover; }
 ```
 
 ## Licensing

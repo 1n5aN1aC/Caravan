@@ -221,9 +221,16 @@ input {
   height: 1rem;
   border-radius: 2px;
   border: 1px solid #2b1a3a;
-  object-fit: cover;
   background:
     repeating-linear-gradient(45deg, #6a3fa0 0 3px, #52307d 3px 6px);
+}
+/* The drawn stand-in above needs its own decoration; a real back image brings
+   its own, and a transparent one must not sit on top of that gradient. */
+img.facedown {
+  border: none;
+  background: none;
+  object-fit: contain;
+  width: 0.8rem;
 }
 
 .caravans {
@@ -332,6 +339,15 @@ input {
 .slot-card:disabled { opacity: 1; }
 .slot-card.target .card,
 .hand-card.selected .card { box-shadow: 0 0 0 3px var(--gold), 0 6px 14px rgba(0, 0, 0, 0.5); }
+
+/* A box-shadow ring would trace the element box, not the card, so cut-out art
+   gets a glow that hugs the artwork instead. */
+.slot-card.target .card.art,
+.hand-card.selected .card.art { box-shadow: none; }
+.slot-card.target .card.art img,
+.hand-card.selected .card.art img {
+  filter: drop-shadow(0 0 2px var(--gold)) drop-shadow(0 0 7px var(--gold));
+}
 .slot-card.target { cursor: pointer; animation: pulse 1.6s ease-in-out infinite; }
 
 @keyframes pulse {
@@ -363,18 +379,25 @@ input {
 .card.black { color: var(--black); }
 .card.joker { color: #6a3fa0; }
 
-/* Supplied artwork. `cover` fills the card, which suits scans whose aspect
-   ratio already matches; switch to `contain` to letterbox an odd-sized pack. */
+/* Supplied artwork. The image carries the card's own shape — cut-out art has
+   transparent corners — so the wrapper drops the drawn card entirely: no
+   background, no border, no rectangular shadow to show through the alpha.
+   Depth comes from a drop-shadow, which follows the artwork's silhouette. */
 .card.art {
-  background: #fffdf8;
-  overflow: hidden;
+  background: none;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
 }
 .card.art img {
   width: 100%;
   height: 100%;
-  object-fit: var(--card-fit, cover);
+  /* `contain` so a cut-out never has its own corners clipped; `cover` suits
+     full-bleed scans that already match the card's aspect ratio. */
+  object-fit: var(--card-fit, contain);
   display: block;
   pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.55));
 }
 
 .card .corner {
