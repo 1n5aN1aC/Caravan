@@ -40,9 +40,9 @@ describe('parseArtPath', () => {
       kind: 'back',
       key: 'tops',
     });
-    expect(parseArtPath('./assets/cards/backs/vault38.jpg')).toEqual({
+    expect(parseArtPath('./assets/cards/backs/lucky38.jpg')).toEqual({
       kind: 'back',
-      key: 'vault38',
+      key: 'lucky38',
     });
   });
 

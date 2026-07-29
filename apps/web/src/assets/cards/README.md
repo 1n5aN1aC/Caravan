@@ -98,7 +98,7 @@ faces and can drop in their own pack.
 
 The deck currently in use locally is the Fallout: New Vegas casino artwork
 (Tops, Gomorrah, Ultra-Luxe, Silver Rush, Atomic Wrangler, Bison Steve and
-Vault 38 backs). That art is Bethesda's, which is fine for playing at home and
+Lucky 38 backs). That art is Bethesda's, which is fine for playing at home and
 not fine to redistribute — hence the ignore rule. If you ever want this repo to
 ship with artwork, use a public-domain deck and record it here:
 
