@@ -73,4 +73,28 @@ describe('DeckBuilder', () => {
     const { container } = render(<DeckBuilder seat={1} onConfirm={() => {}} />);
     expect(container.querySelectorAll('.deck-card')).toHaveLength(54);
   });
+
+  it('lays the grid out rank-first — every suit of a rank together, not every rank of a suit', () => {
+    const { container } = render(<DeckBuilder seat={0} onConfirm={() => {}} />);
+    const labels = [...container.querySelectorAll('.deck-card .card')].map((el) =>
+      el.getAttribute('aria-label'),
+    );
+
+    // The four Aces lead, in one unbroken run — `buildDeck` itself would put
+    // the Ace of Spades 13 cards away from the Ace of Hearts.
+    expect(labels.slice(0, 4)).toEqual([
+      'Ace of spades',
+      'Ace of hearts',
+      'Ace of diamonds',
+      'Ace of clubs',
+    ]);
+    // Kings are the last rank before the Jokers.
+    expect(labels.slice(48, 52)).toEqual([
+      'King of spades',
+      'King of hearts',
+      'King of diamonds',
+      'King of clubs',
+    ]);
+    expect(labels.slice(52)).toEqual(['Joker', 'Joker']);
+  });
 });

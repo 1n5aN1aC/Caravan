@@ -1,7 +1,24 @@
-import { buildDeck, RULES, type Seat } from '@caravan/rules';
+import { buildDeck, FACE_RANKS, NUMBER_RANKS, SUITS, type Card, RULES, type Seat } from '@caravan/rules';
 import { useMemo, useState } from 'react';
 import { PlayingCard } from './PlayingCard.js';
 import { playCue } from './sound.js';
+
+/**
+ * `buildDeck` hands back cards suit by suit (all Spades, then Hearts, …), which
+ * is right for dealing but not for browsing — a removal decision is almost
+ * always "which rank", so the grid is sorted rank-first instead, suit only
+ * breaking ties, Jokers trailing at the end.
+ */
+const RANK_ORDER = new Map<string, number>(
+  [...NUMBER_RANKS, ...FACE_RANKS].map((rank, i) => [rank, i]),
+);
+const SUIT_ORDER = new Map<string, number>(SUITS.map((suit, i) => [suit, i]));
+
+function byRankThenSuit(a: Card, b: Card): number {
+  const rankDiff = (RANK_ORDER.get(a.rank) ?? Infinity) - (RANK_ORDER.get(b.rank) ?? Infinity);
+  if (rankDiff !== 0) return rankDiff;
+  return (SUIT_ORDER.get(a.suit ?? '') ?? 0) - (SUIT_ORDER.get(b.suit ?? '') ?? 0);
+}
 
 /**
  * Deck building, before the deal. The full 54 is laid out and the player clicks
@@ -21,7 +38,7 @@ export function DeckBuilder({
   seat: Seat;
   onConfirm: (keep: string[]) => void;
 }) {
-  const all = useMemo(() => buildDeck(seat), [seat]);
+  const all = useMemo(() => buildDeck(seat).sort(byRankThenSuit), [seat]);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [submitted, setSubmitted] = useState(false);
 
