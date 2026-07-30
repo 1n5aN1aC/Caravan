@@ -1013,6 +1013,9 @@ input {
   .hand { min-height: 11rem; }
   .track { font-size: 0.55rem; padding: 0.15rem 0.35rem; }
   .total .value { font-size: 1rem; }
+  /* The face-down fan costs vertical space a phone doesn't have to spare, and
+     the "N in deck" pill above it already says how many cards they're holding. */
+  .opp-hand { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
