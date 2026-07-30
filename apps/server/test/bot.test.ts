@@ -1,4 +1,4 @@
-import { listLegalMoves, scenario, type MatchState, type Move } from '@caravan/rules';
+import { applyMove, listLegalMoves, scenario, type MatchState, type Move } from '@caravan/rules';
 import { describe, expect, it } from 'vitest';
 import { chooseMove } from '../src/bot.js';
 
@@ -209,6 +209,22 @@ describe('the bot', () => {
       const stateA = scenario({ ...base, p0: { ...base.p0, hand: '2D 3D' } });
       const stateB = scenario({ ...base, p0: { ...base.p0, hand: 'KH AC' } });
       expect(chooseMove(stateA, 1, 'hard')).toEqual(chooseMove(stateB, 1, 'hard'));
+    });
+
+    it('does not sell its own last caravan when that hands the opponent the other two and the match', () => {
+      // p0 already has lanes 0 and 1 locked up (24 each, against p1's 3s) —
+      // those two tracks are decided in p0's favor and nothing this turn can
+      // undo that. Lane 2 is still open: p0 sits at a harmless 5, and p1 is
+      // one card away from 24. Taking it would decide all three tracks at
+      // once and hand p0 the match 2-1 — worse than leaving it alone.
+      const state = scenario({
+        turn: 1,
+        p0: { caravans: ['9S,8H,7D', '9C,8D,7S', '5S'] },
+        p1: { caravans: ['3S', '3H', '6S,8S'], hand: '10C', deckSize: 10 },
+      });
+      const move = chooseMove(state, 1, 'hard')!;
+      const after = applyMove(state, 1, move).state;
+      expect(after.result).not.toEqual({ kind: 'winner', seat: 0, reason: 'tracks' });
     });
 
     it('still only ever plays a legal move once the opponent’s board is empty', () => {

@@ -205,9 +205,32 @@ function laneTotal(state: MatchState, seat: Seat): number {
   return total;
 }
 
-/** The fixed evaluation function `hard` searches with: its own lanes minus
- *  the opponent's, each lane scored by how it actually stands to resolve. */
+/**
+ * Comfortably outside anything `laneTotal` can produce (three lanes, each
+ * capped around 150 + a value in the 20s), so a decided result always
+ * dominates the lane heuristic instead of merely nudging it.
+ */
+const WIN_SCORE = 100_000;
+
+/**
+ * The fixed evaluation function `hard` searches with: its own lanes minus
+ * the opponent's, each lane scored by how it actually stands to resolve —
+ * unless the match is actually over, in which case none of that matters.
+ *
+ * The match ends only when *all three* tracks are decided at once, which
+ * means finishing your own last caravan while the other two already belong
+ * to the opponent doesn't cash in a lane — it hands them the match, since
+ * that was the only track still keeping the game alive. A per-lane sum can't
+ * see that: it just prices the newly-sold lane at its usual bonus, the same
+ * as it would with the other two still undecided. Checking `state.result`
+ * first is what stops the search from ever treating "win the third lane,
+ * losing 1-2" as an improvement over not finishing it.
+ */
 function evaluate(state: MatchState, seat: Seat): number {
+  if (state.result) {
+    if (state.result.kind === 'draw') return 0;
+    return state.result.seat === seat ? WIN_SCORE : -WIN_SCORE;
+  }
   const opponent: Seat = seat === 0 ? 1 : 0;
   return laneTotal(state, seat) - laneTotal(state, opponent);
 }
