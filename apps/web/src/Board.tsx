@@ -2,11 +2,14 @@ import { hydrateForClient, type RedactedCaravan, type RedactedState } from '@car
 import {
   caravanStatus,
   caravanValue,
+  cardFromId,
   effectiveDirection,
   effectiveSuit,
   listLegalMoves,
   resolveTracks,
+  type Card,
   type CaravanStatus,
+  type GameEvent,
   type Move,
   type Seat,
 } from '@caravan/rules';
@@ -44,13 +47,68 @@ const CARAVANS = [0, 1, 2] as const;
 
 const EMPTY_TARGETS: ReadonlyMap<TargetKey, Move> = new Map();
 
+const NO_EVENTS: readonly GameEvent[] = [];
+
+/**
+ * The card that just destroyed something, and where it was played. Removals are
+ * animated after it lands rather than with it — see `useDepartures`.
+ */
+export interface Strike {
+  seat: Seat;
+  caravan: number;
+  slot: number;
+  /**
+   * The striking card, but only when it is not on the table to be drawn from —
+   * a Jack, which destroys itself along with its target. A Joker survives,
+   * attached to its host, so it is already in the snapshot and this is null:
+   * that strike contributes only its pause.
+   */
+  vanished: Card | null;
+}
+
+/**
+ * The one thing the board reads from the event feed rather than the snapshot: a
+ * Jack is gone by the time the snapshot arrives — destroyed along with what it
+ * destroyed — so there is nothing on the table to animate it from. The event
+ * names it by id, and `cardFromId` turns that back into a face.
+ *
+ * Whether the striking card needs drawing is decided by looking for it, not by
+ * its rank: anything still on the table is drawn the ordinary way, and drawing
+ * it here as well would double it.
+ */
+function readStrike(view: RedactedState, events: readonly GameEvent[]): Strike | null {
+  if (!events.some((e) => e.type === 'destroy' && e.cardIds.length > 0)) return null;
+  const played = events.find((e) => e.type === 'play');
+  if (played?.type !== 'play' || played.target.slot === undefined) return null;
+
+  const onTable = view.players.some((p) =>
+    p.caravans.some((c) =>
+      c.slots.some(
+        (s) => s.card.id === played.cardId || s.attached.some((a) => a.id === played.cardId),
+      ),
+    ),
+  );
+  return {
+    seat: played.target.seat,
+    caravan: played.target.caravan,
+    slot: played.target.slot,
+    vanished: onTable ? null : cardFromId(played.cardId),
+  };
+}
+
 export function Board({
   view,
+  events = NO_EVENTS,
   onMove,
   panel,
   frozen = false,
 }: {
   view: RedactedState;
+  /**
+   * What happened between the last snapshot and this one. Used for one thing
+   * only — knowing which card did a removal, so it can be seen doing it.
+   */
+  events?: readonly GameEvent[];
   onMove: (move: Move) => void;
   /** Session chrome from App, hosted at the top of the hand column. */
   panel?: ReactNode;
@@ -146,6 +204,8 @@ export function Board({
   const targets = (activeCard && targetsByCard.get(activeCard)) || EMPTY_TARGETS;
   const draggedCard = drag ? (hand.find((c) => c.id === drag.cardId) ?? null) : null;
 
+  const strike = useMemo(() => readStrike(view, events), [view, events]);
+
   const canDiscard = legal.some((m) => m.type === 'discard' && m.cardId === selectedCard?.id);
   const disbandable = new Set(legal.filter((m) => m.type === 'disband').map((m) => m.caravan));
 
@@ -173,6 +233,7 @@ export function Board({
                 targets={targets}
                 onTarget={fire}
                 dragOver={drag?.over ?? null}
+                strike={strike}
               />
 
               <Gauge
@@ -195,6 +256,7 @@ export function Board({
                 targets={targets}
                 onTarget={fire}
                 dragOver={drag?.over ?? null}
+                strike={strike}
               />
             </div>
           ))}
@@ -408,6 +470,7 @@ function CaravanView({
   targets,
   onTarget,
   dragOver,
+  strike,
 }: {
   side: 'you' | 'opponent';
   caravan: RedactedCaravan;
@@ -416,8 +479,14 @@ function CaravanView({
   targets: ReadonlyMap<TargetKey, Move>;
   onTarget: (move: Move) => void;
   dragOver: string | null;
+  strike: Strike | null;
 }) {
-  const departing = useDepartures(caravan);
+  // A strike anywhere on the table delays every departure — the whole board
+  // waits out the card that caused them — but only the caravan it landed in
+  // has anywhere to draw it.
+  const departing = useDepartures(caravan, strike !== null);
+  const struckHere =
+    strike && strike.seat === seat && strike.caravan === index ? strike : null;
   const appendKey = caravanKey(seat, index);
   const appendMove = targets.get(appendKey);
 
@@ -484,19 +553,52 @@ function CaravanView({
           );
         })}
 
-        {/* Cards removed by a Jack, Joker or disband, on their way off the table. */}
-        {departing.map((gone) => (
-          <div
-            className="slot departing"
-            key={`gone-${gone.card.id}`}
-            style={{ '--i': gone.index } as never}
-            aria-hidden="true"
-          >
-            <span className="slot-card">
-              <PlayingCard card={gone.card} />
-            </span>
-          </div>
-        ))}
+        {/* Cards removed by a Jack, Joker or disband, on their way off the table.
+            They hold their place while the card that removed them lands, then
+            leave — see useDepartures for the two beats. */}
+        {departing.map((gone) => {
+          // The Jack is drawn here rather than in the caravan proper because it
+          // was never in a snapshot: it is destroyed by its own effect, in the
+          // same instant it attaches.
+          const jack = struckHere?.slot === gone.index ? (struckHere?.vanished ?? null) : null;
+          return (
+            <div
+              className={`slot ${gone.leaving ? 'departing' : 'struck'}`}
+              key={`gone-${gone.card.id}`}
+              style={{ '--i': gone.index } as never}
+              aria-hidden="true"
+            >
+              <span className="slot-card">
+                <PlayingCard card={gone.card} />
+              </span>
+              {(gone.attached.length > 0 || jack) && (
+                <span className="attachments">
+                  {/* `settled` — these were already on the card before it was
+                      struck, and this node is new, so without it they would
+                      replay their landing on the way out. */}
+                  {gone.attached.map((face, ai) => (
+                    <span
+                      className="attached-card settled"
+                      key={face.id}
+                      style={{ '--ai': ai } as never}
+                    >
+                      <PlayingCard card={face} />
+                    </span>
+                  ))}
+                  {jack && (
+                    <span
+                      className="attached-card"
+                      key={jack.id}
+                      style={{ '--ai': gone.attached.length } as never}
+                    >
+                      <PlayingCard card={jack} />
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+          );
+        })}
 
         {caravan.slots.length === 0 && departing.length === 0 && (
           <span className="empty-slot" />

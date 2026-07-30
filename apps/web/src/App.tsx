@@ -89,6 +89,7 @@ export function App() {
       {showBoard ? (
         <Board
           view={state.match!}
+          events={state.events}
           onMove={(move) => client.play(move)}
           panel={panel}
           frozen={frozen}
@@ -231,7 +232,9 @@ function Result({
       ? 'the turn limit was reached'
       : result.reason === 'tracks'
         ? 'all three tracks are decided'
-        : 'a player ran out of legal moves';
+        : result.reason === 'empty-hand'
+          ? 'a player ran out of cards'
+          : 'a player ran out of legal moves';
   const headline =
     result.kind === 'draw' ? 'Draw' : result.seat === you ? 'You win' : 'You lose';
   return (

@@ -1,4 +1,4 @@
-import { cardLabel } from './cards.js';
+import { cardLabel, FACE_RANKS, NUMBER_RANKS } from './cards.js';
 import {
   baseDirection,
   caravanValue,
@@ -34,6 +34,30 @@ export function parseCard(token: string, owner: Seat = 0, tag = ''): Card {
     suit: suit as Suit,
     owner,
   };
+}
+
+const RANKS = new Set<string>([...NUMBER_RANKS, ...FACE_RANKS]);
+
+/**
+ * The inverse of the id format `buildDeck` and `parseCard` both write:
+ * `p<owner>:<rank><suit>`, plus the `#n` tag fixtures append to keep duplicates
+ * apart. Events name cards by id alone — a Jack that destroyed something is
+ * never in a snapshot to be looked up — so this rebuilds the face from the id.
+ * null for anything that is not a real card id, such as the placeholder ids
+ * `hydrateForClient` invents for a redacted deck.
+ */
+export function cardFromId(id: string): Card | null {
+  const match = /^p([01]):([^#]+)/.exec(id);
+  if (!match) return null;
+  const owner = Number(match[1]) as Seat;
+  const body = match[2]!;
+  if (body.startsWith('JOKER') || body.startsWith('JKR')) {
+    return { id, rank: 'JOKER', suit: null, owner };
+  }
+  const suit = body.slice(-1);
+  const rank = body.slice(0, -1);
+  if (!SUITS.has(suit) || !RANKS.has(rank)) return null;
+  return { id, rank: rank as Rank, suit: suit as Suit, owner };
 }
 
 export function parseCards(tokens: string, owner: Seat = 0): Card[] {

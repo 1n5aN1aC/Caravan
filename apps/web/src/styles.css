@@ -39,7 +39,7 @@
 
   --radius: 0.35rem;
 
-  --slide: 650ms cubic-bezier(0.2, 0.9, 0.3, 1);
+  --slide: 1000ms cubic-bezier(0.2, 0.9, 0.3, 1);
 
   font-family: 'Segoe UI', Roboto, ui-sans-serif, system-ui, sans-serif;
   color-scheme: dark;
@@ -492,10 +492,24 @@ input {
   to { transform: none; opacity: 1; }
 }
 
-/* Destroyed cards slide off the table instead of blinking out. The duration is
-   mirrored by DEPARTURE_MS in useDepartures.ts, which decides how long the card
-   is kept in the DOM — - change the two together or the card vanishes mid-flight. */
-.slot.departing { animation: depart 700ms ease-in both; pointer-events: none; }
+/* A removal is two beats. First the card that did it lands and the struck card
+   flinches under it; only then does anything leave. Both durations are mirrored
+   by STRIKE_MS and DEPARTURE_MS in useDepartures.ts, which decide how long the
+   card is kept in the DOM — change them together or it vanishes mid-flight.
+
+   `.struck` needs an animation of its own even though it barely moves: these
+   are freshly mounted .slot elements, and without one they would run `deal` and
+   arrive from off-screen just to be destroyed. */
+/* The flinch is held off until 85%, which is where the 1s landing above it
+   finishes — the card reacts to being hit, so it cannot move before contact. */
+.slot.struck { animation: struck 1180ms ease-out both; pointer-events: none; }
+@keyframes struck {
+  0%, 85% { transform: none; }
+  91% { transform: translateY(0.2rem) scale(0.965); }
+  100% { transform: none; }
+}
+
+.slot.departing { animation: depart 1000ms ease-in both; pointer-events: none; }
 @keyframes depart {
   from { transform: none; opacity: 1; }
   to { transform: translate(2.5rem, -1.5rem) rotate(14deg); opacity: 0; }
@@ -613,6 +627,32 @@ input {
 }
 .side-you .attached-card { left: calc((var(--ai) + 1) * var(--card-w) * 0.25); }
 .side-opponent .attached-card { right: calc((var(--ai) + 1) * var(--card-w) * 0.25); }
+
+/* Face cards are dealt onto the card they were played on, the same way number
+   cards are dealt onto the table — otherwise a Queen, King or Jack simply
+   appears, and the move that mattered most is the only one you cannot see
+   happen. Position is `left`/`right` here, so the transform is free.
+
+   This replays only on a fresh element: attachments are keyed by card id and
+   survive a snapshot, so a landed face card stays landed. The exception is a
+   departing slot, which is a new node built from the card that was destroyed —
+   its existing attachments carry `settled` to sit still on the way out.
+   Duration is a beat inside STRIKE_MS, so a Jack has finished landing before
+   what it destroyed starts to leave. */
+.attached-card { animation: attach-land 1000ms ease-out both; }
+.attached-card.settled { animation: none; }
+
+@keyframes attach-land {
+  from { transform: translate(1rem, -2.4rem) rotate(-14deg) scale(1.18); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+/* Mirrored, so the opponent's face cards arrive from their side of the table. */
+.side-opponent .attached-card { animation-name: attach-land-far; }
+@keyframes attach-land-far {
+  from { transform: translate(-1rem, 2.4rem) rotate(14deg) scale(1.18); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.side-opponent .attached-card.settled { animation: none; }
 
 /* -- centre line ------------------------------------------------------- */
 

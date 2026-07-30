@@ -135,9 +135,15 @@ reusing `deal` would have thrown away its centring translate.
 Nothing inside a slot can paint above a *neighbouring* slot. To lift a card
 clear of the ones overlapping it, raise the `.slot`, not the button.
 
-**3. `DEPARTURE_MS` must equal the CSS `depart` duration.** `useDepartures.ts`
-decides how long a destroyed card stays in the DOM; the CSS decides how long it
-takes to fly off. Change one without the other and cards vanish mid-flight.
+**3. `STRIKE_MS` and `DEPARTURE_MS` must equal the CSS `struck` and `depart`
+durations.** `useDepartures.ts` decides how long a destroyed card stays in the
+DOM; the CSS decides how long each of its two beats takes. Change one without
+the other and cards vanish mid-flight, or sit still after the animation ends.
+
+**3b. A departing slot mounts fresh, so it runs `deal` unless something else
+claims the animation.** That is why `.slot.struck` has keyframes at all despite
+barely moving: without them a card would fly *in* from off-screen purely to be
+destroyed. Same reason `.attached-card.settled` exists.
 
 **4. `--fan-w` must be at least the fan's real span** for a full eight-card
 opening hand. It is not derived — it depends on `FAN_STEP_DEG`, the hand card
@@ -153,6 +159,43 @@ target.
 **6. Overlap means highlights hide.** Cards overlap by up to three quarters, so a
 ring drawn around a card mid-caravan is mostly behind its neighbour. Feedback has
 to move the card, not just outline it.
+
+## Removals happen in two beats
+
+A snapshot that takes a card off the table is the same snapshot that plays the
+card doing the taking. Animating both at once means the cause and its effect
+land in the same instant and neither reads — which is exactly how this used to
+look: cards simply flew away and the Jack was never seen at all.
+
+So a removal is staged. `useDepartures` holds the departed cards in place for
+`STRIKE_MS` (`.slot.struck` — a small flinch, nothing more) and only then lets
+them go (`.slot.departing`). The delay applies when a played card is known to be
+responsible; a disband has no such card, so its cards leave immediately.
+
+Knowing *which* card is responsible is the one thing the board reads from the
+event feed rather than the snapshot. **A Jack is in no snapshot** — it destroys
+itself along with its target, in the same instant it attaches — so there is
+nothing on the table to animate it from. The `play` event names it by id and
+`cardFromId` (in `@caravan/rules`) rebuilds the face from that id, since ids are
+written as `p<owner>:<rank><suit>`. `Board.readStrike` pairs a `destroy` event
+with the `play` in the same batch; `net.ts` patches `events` and `match`
+together and never separately, so they cannot drift apart. *Which* cards left is
+still found by diffing snapshots, as before — the events only say why.
+
+A Joker is different: it survives, attached to its host, so it is already in the
+snapshot and is drawn the ordinary way. Its strike is still reported, and there
+its only job is the pause — the cards it destroys are in other caravans, and
+they wait for it to land.
+
+**Face cards land rather than appear.** `.attached-card` animates in over 1s —
+the same second `--slide` gives a number card being dealt onto the table — and
+`STRIKE_MS` is that second plus a short beat, so a Jack has finished arriving
+before its victim starts to leave. This covers Queens and Kings too, which previously popped into
+place with no animation whatsoever. It replays only on a fresh element, and
+attachments are keyed by card id, so a landed face card stays landed across
+snapshots. The exception is a departing slot: that is a *new* node rebuilt from
+the destroyed card, so the attachments it already had carry `settled` (which
+kills the animation) and only the Jack animates.
 
 ## Card art
 

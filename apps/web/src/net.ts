@@ -1,5 +1,5 @@
 import { NET, type Difficulty, type RedactedState, type ServerMessage } from '@caravan/protocol';
-import type { Move } from '@caravan/rules';
+import type { GameEvent, Move } from '@caravan/rules';
 
 export type Connectivity = 'connecting' | 'open' | 'closed';
 
@@ -13,6 +13,12 @@ export interface ClientState {
   decksReady: [boolean, boolean];
   reconnectDeadline: number | null;
   match: RedactedState | null;
+  /**
+   * What happened to produce `match`, always replaced alongside it. The board
+   * renders from the snapshot alone; this is read for one thing only, which is
+   * knowing which card caused a removal so it can be seen causing it.
+   */
+  events: GameEvent[];
   error: string | null;
   endedReason: string | null;
 }
@@ -28,6 +34,7 @@ const initial: ClientState = {
   decksReady: [false, false],
   reconnectDeadline: null,
   match: null,
+  events: [],
   error: null,
   endedReason: null,
 };
@@ -124,10 +131,15 @@ export class CaravanClient {
           reconnectDeadline: message.reconnectDeadline,
         });
       case 'state':
-        // `message.events` is deliberately ignored: the board renders from the
-        // snapshot alone, and card removals are animated by diffing consecutive
-        // snapshots (see useDepartures) rather than by reading events.
-        return this.patch({ match: message.state as RedactedState });
+        // The board renders from the snapshot alone, and *which* cards left is
+        // still found by diffing consecutive snapshots (see useDepartures). The
+        // events ride along only to say what removed them — a Jack destroys
+        // itself with its target, so it is in no snapshot to be drawn from.
+        // Patched together with the state they explain, never separately.
+        return this.patch({
+          match: message.state as RedactedState,
+          events: message.events as GameEvent[],
+        });
       case 'error':
         return this.patch({ error: message.message });
       case 'ended':
