@@ -13,6 +13,7 @@ many cards are actually on the table, which CSS cannot compute — those live in
 | File | Owns |
 |---|---|
 | `src/App.tsx` | Landing page, the session panel, the result overlay, connection state |
+| `src/DeckBuilder.tsx` | Trimming the full 54 down before the deal |
 | `src/Board.tsx` | The table: columns, caravans, centre line, the hand |
 | `src/PlayingCard.tsx` | One card face — supplied art, or a face drawn in CSS |
 | `src/cardArt.ts` | Matching image files to cards at build time |
@@ -166,6 +167,30 @@ That is why highlight rings on art cards are `drop-shadow` filters rather than
 `box-shadow`: a box-shadow would trace the element box, not the card.
 
 See `src/assets/cards/README.md` for naming and the import scripts.
+
+## Deck building
+
+`DeckBuilder.tsx` lays out `buildDeck(seat)` — the same 54 the engine deals
+from — as a grid of ordinary `.card`s wrapped in buttons. Clicking one toggles
+it out; there is no separate "selected" state to reconcile, because "kept" is
+just "not in the removed set". The floor (`RULES.MIN_DECK_SIZE`) is enforced by
+refusing the click that would cross it rather than disabling cards in
+advance — with 54 buttons on screen, precomputing which ones are still legal to
+remove would mean recomputing 54 button states on every click for a fact
+(`kept > floor`) that is one number.
+
+`App.tsx` decides whether to show it: as soon as a seat exists and the match
+hasn't been dealt, gated on `!decksReady[seat]` rather than local component
+state, so a refresh mid-build resumes into the right screen — the server's
+bookkeeping is the source of truth for "have I already sent mine", the same way
+`RedactedState` is the source of truth for everything else here. It appears the
+moment a seat is granted, not once an opponent joins; there is no reason to make
+the host wait to start trimming.
+
+Validity is the rules engine's call (`checkDeckSelection`), applied identically
+on both ends — the client's floor enforcement is advisory UI, exactly like
+legality highlighting, and the server re-checks a submitted deck independently
+before ever dealing from it.
 
 ## Sound
 

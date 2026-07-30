@@ -3,6 +3,8 @@
  * variants are a one-line change.
  */
 export const RULES = {
+  /** The fewest cards a built deck may keep of the full 54. */
+  MIN_DECK_SIZE: 30,
   /** Cards dealt at the start of the match. */
   OPENING_HAND_SIZE: 8,
   /** Hand size maintained during the main phase while the deck holds cards. */

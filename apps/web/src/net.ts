@@ -7,8 +7,10 @@ export interface ClientState {
   connectivity: Connectivity;
   code: string | null;
   seat: 0 | 1 | null;
-  status: 'idle' | 'waiting' | 'playing' | 'ended';
+  status: 'idle' | 'waiting' | 'building' | 'playing' | 'ended';
   present: [boolean, boolean];
+  /** Per seat: has that seat's built deck been accepted by the server. */
+  decksReady: [boolean, boolean];
   reconnectDeadline: number | null;
   match: RedactedState | null;
   error: string | null;
@@ -23,6 +25,7 @@ const initial: ClientState = {
   seat: null,
   status: 'idle',
   present: [false, false],
+  decksReady: [false, false],
   reconnectDeadline: null,
   match: null,
   error: null,
@@ -85,6 +88,11 @@ export class CaravanClient {
     this.send({ t: 'join', code: code.trim().toUpperCase() });
   }
 
+  /** The card ids this seat's built deck keeps. Sent once, before the deal. */
+  submitDeck(keep: string[]): void {
+    this.send({ t: 'deck', keep });
+  }
+
   play(move: Move): void {
     this.send({ t: 'move', move });
   }
@@ -111,6 +119,7 @@ export class CaravanClient {
           code: message.code,
           status: message.status,
           present: message.present,
+          decksReady: message.decksReady,
           reconnectDeadline: message.reconnectDeadline,
         });
       case 'state':

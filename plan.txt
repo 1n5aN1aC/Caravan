@@ -30,11 +30,13 @@ play a complete, correct match in their browsers. Nothing else.
 
 
 
-**Deliberately out of scope for v1:** accounts, deck building, AI opponents,
+**Deliberately out of scope for v1:** accounts, AI opponents,
 
 matchmaking, ranking, chat/emotes, spectators, rematch, animation, persistence
 
 across restarts, public hosting. Each is discussed under "Designed-for extensions."
+
+Deck building has since shipped and is no longer on this list — see the README.
 
 
 
@@ -504,12 +506,6 @@ Each phase is independently verifiable.
 The v1 structure deliberately accommodates these without rework:
 
 
-
-- **Deck building** — deck construction is already abstracted behind a source interface;
-
-  per-player custom decks (FNV: min 30 cards, no duplicate of the same card from the same
-
-  set) drop in without touching game logic.
 
 - **Retro-terminal theme** — isolated style layer.
 

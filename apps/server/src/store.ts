@@ -6,7 +6,10 @@ export interface Room {
   code: string;
   seed: string;
   state: MatchState | null;
-  /** Recorded for deterministic replay: seed + moves reproduces the match. */
+  /** Per seat: the built deck's kept card ids, or null while still building.
+      Part of the replay record — the deal depends on it as much as the seed. */
+  decks: [string[] | null, string[] | null];
+  /** Recorded for deterministic replay: seed + decks + moves reproduces the match. */
   moves: Array<{ seat: Seat; move: Move }>;
   /** Which seats have been claimed, and when each last went quiet. */
   claimed: [boolean, boolean];

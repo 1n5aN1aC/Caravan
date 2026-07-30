@@ -73,6 +73,7 @@ describe('App', () => {
           code: 'ABCD',
           status: 'playing',
           present: [true, true],
+          decksReady: [true, true],
           reconnectDeadline: null,
         }),
       );

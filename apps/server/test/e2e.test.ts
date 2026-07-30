@@ -3,7 +3,7 @@ import {
   type RedactedState,
   type ServerMessage,
 } from '@caravan/protocol';
-import { listLegalMoves, replay, type Move, type Seat } from '@caravan/rules';
+import { buildDeck, listLegalMoves, replay, type Move, type Seat } from '@caravan/rules';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { createCaravanServer, type CaravanServer } from '../src/server.js';
@@ -88,7 +88,13 @@ async function seatedPair(): Promise<{ host: Client; guest: Client }> {
 
   const guest = await Client.open(port);
   guest.send({ t: 'join', code: host.code });
-  await guest.until(() => guest.view !== null, 'guest seating');
+  await guest.until(() => guest.seat !== null, 'guest seating');
+
+  // Both seats claimed, both decks the full 54 — the deal happens the instant
+  // the second one lands.
+  host.send({ t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+  guest.send({ t: 'deck', keep: buildDeck(1).map((c) => c.id) });
+  await guest.until(() => guest.view !== null, 'guest snapshot');
   await host.until(() => host.view !== null, 'host snapshot');
   return { host, guest };
 }

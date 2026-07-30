@@ -162,13 +162,35 @@ fixture.
 
 ## Not in v1
 
-Accounts, deck building, AI opponents, matchmaking, ranking, chat, spectators,
-rematch, a move log, persistence across restarts, and public hosting. The
-structure accommodates each without rework — see "Designed-for extensions" in
-[`plan.txt`](plan.txt). A server restart kills in-flight matches; that is
-accepted.
+Accounts, AI opponents, matchmaking, ranking, chat, spectators, rematch, a move
+log, persistence across restarts, and public hosting. The structure accommodates
+each without rework — see "Designed-for extensions" in [`plan.txt`](plan.txt). A
+server restart kills in-flight matches; that is accepted.
 
 Cards are animated — dealt, slid off the table when destroyed, and dragged — so
 that entry has left this list. The server still sends a per-move event stream
 alongside each snapshot; nothing reads it today, and it is what a move log or a
 replay viewer would be built on.
+
+Deck building has left the list too, in its simplest possible form: no
+curation, no rarity, no swapping in cards you don't already own — trimming down
+from the full 54. See "Deck building" below.
+
+### Deck building
+
+Both players see their own full 54 before the deal and trim it down to
+whatever they don't want, with a floor of `RULES.MIN_DECK_SIZE` (30) cards. The
+whole interaction is removal, not selection — a room enters `building` the
+moment both seats are claimed, each side submits once, and the deal fires the
+instant the second deck is in. A seat can start trimming immediately after
+creating or joining a room; there is no reason to make the host wait on an
+opponent before deciding what to cut.
+
+The rules engine owns validity (`checkDeckSelection`) and dealing from a
+built deck (`createMatch(seed, decks)`) exactly the way it already owns move
+legality — the server re-validates independently, so the client's floor
+enforcement is advisory UI, same as everywhere else in this project. A deck
+thin enough on number cards to make the ordinary auto-mulligan loop struggle
+falls back to a stacked deal rather than failing outright; both paths are
+seeded, so a match started from any pair of decks still replays exactly from
+`{ seed, decks, moves }`.

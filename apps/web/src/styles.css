@@ -160,6 +160,7 @@ button:hover:not(:disabled) { filter: brightness(1.15); }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.35; cursor: default; box-shadow: none; }
 button.danger { background: linear-gradient(#8d3b36, #6d2b27); border-color: #4a1c19; }
+button.confirm { background: linear-gradient(var(--gold), #b6923f); border-color: #7a5f23; color: #2a1f08; font-weight: 700; }
 
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
@@ -195,6 +196,75 @@ input {
 }
 .landing form { display: flex; gap: 0.5rem; }
 .landing .or { color: var(--ink-dim); font-size: 0.8rem; }
+
+/* -- deck building -------------------------------------------------------- */
+
+/*
+ * The full 54, laid out for removal rather than selection — the default deck
+ * is everything, so clicking a card *out* is the common gesture, not clicking
+ * cards in one at a time. Reuses `.card` at its normal table size; nothing
+ * about a card's own rendering changes here, only the button around it.
+ */
+.deckbuilder {
+  margin: 1.5rem auto;
+  padding: 1.2rem 1.4rem 1.6rem;
+  max-width: 64rem;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 0.6rem;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+}
+
+.deck-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem 1rem;
+  margin-bottom: 0.3rem;
+}
+.deck-bar h2 {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.deck-count { font-size: 0.85rem; color: var(--ink-dim); }
+.deck-count strong { color: var(--ink); font-size: 1rem; }
+
+.deck-hint { margin: 0 0 0.9rem; font-size: 0.78rem; color: var(--ink-dim); }
+
+.deck-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-w), 1fr));
+  gap: 0.5rem;
+}
+
+.deck-card {
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  border-radius: var(--radius);
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+.deck-card:hover:not(:disabled) { transform: translateY(-0.2rem); }
+/* Removed rather than merely dimmed, so "out" reads at a glance across a full
+   grid of 54 — a saturation fade alone gets lost at this density. */
+.deck-card.out { opacity: 0.28; filter: saturate(0.3); }
+.deck-card.out:hover:not(:disabled) { opacity: 0.55; }
+.deck-card:disabled { cursor: default; }
+
+.deck-waiting {
+  margin: 4rem auto;
+  padding: 1.5rem 2rem;
+  max-width: 28rem;
+  text-align: center;
+  color: var(--ink-dim);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  border-radius: 0.6rem;
+}
 
 .code {
   font-size: 1.05rem;

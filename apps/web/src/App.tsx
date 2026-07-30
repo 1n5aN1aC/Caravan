@@ -6,6 +6,7 @@ import {
   type ReactElement,
 } from 'react';
 import { Board } from './Board.js';
+import { DeckBuilder } from './DeckBuilder.js';
 import { CaravanClient } from './net.js';
 import { sound } from './sound.js';
 
@@ -35,6 +36,14 @@ export function App() {
   // not just on abandonment, so this is the common path and not an edge case.
   const showBoard = state.match !== null;
   const frozen = state.status === 'ended';
+
+  // A deck is submitted once and only once, so this reads it off the server's
+  // own bookkeeping rather than local state — a refresh mid-build resumes into
+  // the right screen instead of forgetting a deck was already sent.
+  const mySubmitted = seated && state.decksReady[state.seat!];
+  // Offered as soon as a seat exists, not gated on an opponent — there is no
+  // reason to make the host wait for company before trimming their own deck.
+  const showDeckBuilder = seated && !showBoard && !mySubmitted;
 
   // Handed to the Board so it can sit above the hand. With no board to host it —
   // the landing page — it stands on its own instead.
@@ -97,6 +106,16 @@ export function App() {
               Join
             </button>
           </form>
+        </section>
+      )}
+
+      {showDeckBuilder && (
+        <DeckBuilder seat={state.seat!} onConfirm={(keep) => client.submitDeck(keep)} />
+      )}
+
+      {seated && !showBoard && mySubmitted && (
+        <section className="deck-waiting">
+          <p>Deck locked in — waiting for your opponent.</p>
         </section>
       )}
 
@@ -183,6 +202,10 @@ function Status({ state }: { state: ReturnType<CaravanClient['getSnapshot']> }) 
     }
     if (state.status === 'waiting') {
       return ['Waiting', <span className="status">Share the code for an opponent</span>];
+    }
+    if (state.status === 'building') {
+      const ready = state.decksReady.filter(Boolean).length;
+      return ['Waiting', <span className="status">{ready}/2 decks ready</span>];
     }
     if (countdown !== null) {
       return ['Waiting', <span className="status warn">Reconnecting… {countdown}s</span>];

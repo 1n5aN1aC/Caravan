@@ -1,4 +1,4 @@
-import { buildDeck, isNumberCard } from './cards.js';
+import { buildDeck, checkDeckSelection, isNumberCard } from './cards.js';
 import { FEATURES, RULES } from './config.js';
 import { evaluateMatch } from './resolve.js';
 import { applyFaceEffect } from './effects.js';
@@ -25,12 +25,30 @@ function countNumberCards(cards: Card[]): number {
 }
 
 /**
+ * Per seat: the card ids that seat's built deck keeps, or null for the full 54.
+ * Validated by `checkDeckSelection`; `createMatch` refuses an invalid one.
+ */
+export type DeckSelections = [readonly string[] | null, readonly string[] | null];
+
+function builtDeck(seat: Seat, keep: readonly string[] | null): Card[] {
+  const full = buildDeck(seat);
+  if (keep === null) return full;
+  const wanted = new Set(keep);
+  return full.filter((card) => wanted.has(card.id));
+}
+
+/**
  * Deal one player's opening hand, silently reshuffling and redealing while the
  * hand holds fewer than the minimum number cards. Invisible to both players.
  */
-function dealPlayer(seat: Seat, rng: Rng, events: GameEvent[]): PlayerState {
+function dealPlayer(
+  seat: Seat,
+  rng: Rng,
+  events: GameEvent[],
+  keep: readonly string[] | null,
+): PlayerState {
   for (let attempt = 0; attempt < RULES.MAX_MULLIGANS; attempt++) {
-    const deck = shuffle(buildDeck(seat), rng);
+    const deck = shuffle(builtDeck(seat, keep), rng);
     const hand = deck.splice(0, RULES.OPENING_HAND_SIZE);
     if (countNumberCards(hand) >= RULES.MIN_NUMBER_CARDS_IN_HAND) {
       events.push({ type: 'deal', seat, count: hand.length });
@@ -38,14 +56,37 @@ function dealPlayer(seat: Seat, rng: Rng, events: GameEvent[]): PlayerState {
     }
     events.push({ type: 'mulligan', seat });
   }
-  throw new Error('auto-mulligan failed to produce a legal hand');
+
+  // A built deck can be so short of number cards that random deals keep missing
+  // — with the bare minimum kept, even a hundred mulligans fail a real fraction
+  // of the time. Deck validation guarantees the cards for a legal hand *exist*,
+  // so rather than throw, stack the deal: pull the needed number cards out of
+  // the shuffled order, then fill the hand from the top as usual. Still seeded,
+  // still invisible, and only ever reached by decks a fair shuffle defeats.
+  const deck = shuffle(builtDeck(seat, keep), rng);
+  const hand: Card[] = [];
+  for (let i = 0; i < deck.length && hand.length < RULES.MIN_NUMBER_CARDS_IN_HAND; ) {
+    if (isNumberCard(deck[i]!)) hand.push(deck.splice(i, 1)[0]!);
+    else i++;
+  }
+  hand.push(...deck.splice(0, RULES.OPENING_HAND_SIZE - hand.length));
+  events.push({ type: 'deal', seat, count: hand.length });
+  return { deck, hand, discard: [], caravans: emptyCaravans() };
 }
 
-export function createMatch(seed: string): MoveOutcome {
+export function createMatch(seed: string, decks?: DeckSelections): MoveOutcome {
+  for (const seat of [0, 1] as Seat[]) {
+    const keep = decks?.[seat] ?? null;
+    if (keep !== null) {
+      const reason = checkDeckSelection(seat, keep);
+      if (reason !== null) throw new Error(`seat ${seat} deck: ${reason}`);
+    }
+  }
+
   const rng = createRng(seed);
   const events: GameEvent[] = [];
-  const p0 = dealPlayer(0, rng, events);
-  const p1 = dealPlayer(1, rng, events);
+  const p0 = dealPlayer(0, rng, events, decks?.[0] ?? null);
+  const p1 = dealPlayer(1, rng, events, decks?.[1] ?? null);
   const first: Seat = rng.nextInt(2) === 0 ? 0 : 1;
 
   const state: MatchState = {
@@ -65,16 +106,18 @@ export function createMatch(seed: string): MoveOutcome {
 }
 
 /**
- * A recorded match: the seed plus the ordered move list is enough to reproduce
- * it exactly, which is what turns "it did something weird" into a fixture.
+ * A recorded match: the seed, the built decks, and the ordered move list are
+ * enough to reproduce it exactly, which is what turns "it did something weird"
+ * into a fixture. `decks` may be omitted for matches played with full decks.
  */
 export interface Replay {
   seed: string;
   moves: Array<{ seat: Seat; move: Move }>;
+  decks?: DeckSelections;
 }
 
 export function replay(record: Replay): MoveOutcome {
-  let { state, events } = createMatch(record.seed);
+  let { state, events } = createMatch(record.seed, record.decks);
   const all = [...events];
   for (const { seat, move } of record.moves) {
     const step = applyMove(state, seat, move);

@@ -1,5 +1,5 @@
 import { ClientMessage, NET, type RedactedState, type ServerMessage } from '@caravan/protocol';
-import { listLegalMoves } from '@caravan/rules';
+import { buildDeck, listLegalMoves } from '@caravan/rules';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Hub, type Connection } from '../src/hub.js';
 import { InMemoryMatchStore, SeatTokens } from '../src/store.js';
@@ -33,14 +33,28 @@ function open(): TestConnection {
   return new TestConnection();
 }
 
-/** Creates a room and joins a second player; returns both connections. */
-function pair(): { host: TestConnection; guest: TestConnection; code: string } {
+/** Creates a room and joins a second player, before either deck is in. */
+function seatedPair(): { host: TestConnection; guest: TestConnection; code: string } {
   const host = open();
   hub.handle(host, { t: 'create' });
   const code = host.last('seated')!.code;
   const guest = open();
   hub.handle(guest, { t: 'join', code });
   return { host, guest, code };
+}
+
+/** Full 54s for both seats — the deck-building tests want the trimmed case,
+    everything else wants a dealt match without caring how the deck got built. */
+function submitFullDecks(host: TestConnection, guest: TestConnection): void {
+  hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+  hub.handle(guest, { t: 'deck', keep: buildDeck(1).map((c) => c.id) });
+}
+
+/** A room with both seats claimed and both decks in, ready to play. */
+function pair(): { host: TestConnection; guest: TestConnection; code: string } {
+  const seated = seatedPair();
+  submitFullDecks(seated.host, seated.guest);
+  return seated;
 }
 
 describe('rooms', () => {
@@ -53,10 +67,18 @@ describe('rooms', () => {
     expect(host.last('room')!.status).toBe('waiting');
   });
 
-  it('starts the match when the second player joins', () => {
-    const { host, guest } = pair();
+  it('moves to deck building, not straight to play, once the second player joins', () => {
+    const { host, guest } = seatedPair();
     expect(guest.last('seated')!.seat).toBe(1);
+    expect(host.last('room')!.status).toBe('building');
+    expect(host.last('state')).toBeUndefined();
+    expect(guest.last('state')).toBeUndefined();
+  });
+
+  it('starts the match once both decks are in', () => {
+    const { host, guest } = pair();
     expect(host.last('room')!.status).toBe('playing');
+    expect(host.last('room')!.decksReady).toEqual([true, true]);
     expect(host.last('state')).toBeDefined();
     expect(guest.last('state')).toBeDefined();
   });
@@ -73,6 +95,61 @@ describe('rooms', () => {
     const stray = open();
     hub.handle(stray, { t: 'join', code: 'ZZZZ' });
     expect(stray.last('error')!.message).toMatch(/no room/);
+  });
+});
+
+describe('deck building', () => {
+  it('lets the host trim a deck before an opponent has even joined', () => {
+    const host = open();
+    hub.handle(host, { t: 'create' });
+    const kept = buildDeck(0).slice(0, 40).map((c) => c.id);
+    hub.handle(host, { t: 'deck', keep: kept });
+    expect(host.last('room')!.decksReady).toEqual([true, false]);
+    expect(host.last('room')!.status).toBe('waiting');
+    expect(host.last('error')).toBeUndefined();
+  });
+
+  it('deals from exactly the kept cards once both decks are in', () => {
+    const { host, guest } = seatedPair();
+    const keptHost = buildDeck(0)
+      .filter((c) => c.rank !== 'K')
+      .map((c) => c.id);
+    hub.handle(host, { t: 'deck', keep: keptHost });
+    expect(host.last('room')!.status).toBe('building'); // still waiting on guest
+    hub.handle(guest, { t: 'deck', keep: buildDeck(1).map((c) => c.id) });
+
+    const state = host.last('state')!.state as RedactedState;
+    expect(state.players[0].hand!.some((c) => c.rank === 'K')).toBe(false);
+    expect(host.last('room')!.status).toBe('playing');
+  });
+
+  it('rejects a deck under the minimum size', () => {
+    const { host } = seatedPair();
+    const tooFew = buildDeck(0).slice(0, 29).map((c) => c.id);
+    hub.handle(host, { t: 'deck', keep: tooFew });
+    expect(host.last('error')!.message).toMatch(/at least 30/);
+    expect(host.last('room')!.decksReady).toEqual([false, false]);
+  });
+
+  it('rejects an id that is not one of the seat’s own cards', () => {
+    const { host } = seatedPair();
+    const forged = buildDeck(0).slice(0, 29).map((c) => c.id);
+    forged.push('p1:AS'); // belongs to the other seat
+    hub.handle(host, { t: 'deck', keep: forged });
+    expect(host.last('error')!.message).toMatch(/no such card/);
+  });
+
+  it('rejects a second submission from the same seat', () => {
+    const { host } = seatedPair();
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+    expect(host.last('error')!.message).toMatch(/already/);
+  });
+
+  it('never lets a deck arrive after the match has been dealt', () => {
+    const { host } = pair();
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+    expect(host.last('error')!.message).toMatch(/already been dealt/);
   });
 });
 

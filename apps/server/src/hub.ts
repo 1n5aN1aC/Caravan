@@ -9,6 +9,7 @@ import {
 import {
   IllegalMoveError,
   applyMove,
+  checkDeckSelection,
   createMatch,
   type GameEvent,
   type Move,
@@ -59,6 +60,8 @@ export class Hub {
         return this.join(connection, message.code);
       case 'resume':
         return this.resume(connection, message.token);
+      case 'deck':
+        return this.deck(connection, message.keep);
       case 'move':
         return this.move(connection, message.move);
       case 'leave':
@@ -111,6 +114,7 @@ export class Hub {
       code,
       seed: generateSeed(),
       state: null,
+      decks: [null, null],
       moves: [],
       claimed: [true, false],
       disconnectedAt: [null, null],
@@ -134,12 +138,44 @@ export class Hub {
     occupants[1] = connection;
     this.seat(connection, room, 1);
 
-    // Both seats claimed: deal.
-    const { state, events } = createMatch(room.seed);
-    room.state = state;
+    // Both seats claimed: the room moves to deck building. The deal waits for
+    // both built decks — see `deck` below, and `maybeStart` for the moment the
+    // second one lands.
     room.lastActivity = this.now();
-    this.broadcastRoom(room);
-    this.broadcastState(room, events);
+    this.maybeStart(room);
+  }
+
+  /**
+   * A seat's built deck. Accepted any time before the deal — the host can trim
+   * theirs while still waiting for an opponent — and validated by the same
+   * rules code the client's builder counts with.
+   */
+  private deck(connection: Connection, keep: string[]): void {
+    const session = this.sessions.get(connection);
+    if (!session) return this.fail(connection, 'you are not seated');
+    const room = this.store.get(session.code);
+    if (!room || room.ended) return this.fail(connection, 'that room is gone');
+    if (room.state) return this.fail(connection, 'the match has already been dealt');
+    if (room.decks[session.seat]) return this.fail(connection, 'your deck is already in');
+
+    const reason = checkDeckSelection(session.seat, keep);
+    if (reason !== null) return this.fail(connection, reason);
+
+    room.decks[session.seat] = [...keep];
+    room.lastActivity = this.now();
+    this.maybeStart(room);
+  }
+
+  /** Deals the moment both seats are claimed and both decks are in. */
+  private maybeStart(room: Room): void {
+    if (room.claimed[0] && room.claimed[1] && room.decks[0] && room.decks[1]) {
+      const { state, events } = createMatch(room.seed, [room.decks[0], room.decks[1]]);
+      room.state = state;
+      this.broadcastRoom(room);
+      this.broadcastState(room, events);
+    } else {
+      this.broadcastRoom(room);
+    }
   }
 
   private resume(connection: Connection, token: string): void {
@@ -224,8 +260,15 @@ export class Hub {
     const message: ServerMessage = {
       t: 'room',
       code: room.code,
-      status: room.ended ? 'ended' : room.state ? 'playing' : 'waiting',
+      status: room.ended
+        ? 'ended'
+        : room.state
+          ? 'playing'
+          : room.claimed[1]
+            ? 'building'
+            : 'waiting',
       present: [occupants[0] !== null, occupants[1] !== null],
+      decksReady: [room.decks[0] !== null, room.decks[1] !== null],
       reconnectDeadline: graceStart === null ? null : graceStart + NET.RECONNECT_GRACE_MS,
     };
     for (const connection of occupants) connection?.send(message);

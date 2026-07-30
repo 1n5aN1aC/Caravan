@@ -28,6 +28,12 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('join'), code: RoomCode }),
   /** Reconnect into a seat held by an HMAC-signed token from localStorage. */
   z.object({ t: z.literal('resume'), token: z.string() }),
+  /**
+   * The card ids this seat's built deck keeps. Bounds here are only shape
+   * checks; whether the selection is a legal deck is the rules engine's call
+   * (`checkDeckSelection`), applied by the hub.
+   */
+  z.object({ t: z.literal('deck'), keep: z.array(z.string().max(24)).min(1).max(54) }),
   z.object({ t: z.literal('move'), move: MoveSchema }),
   z.object({ t: z.literal('leave') }),
   z.object({ t: z.literal('ping') }),
@@ -36,7 +42,7 @@ export const ClientMessage = z.discriminatedUnion('t', [
 export type ClientMessage = z.infer<typeof ClientMessage>;
 export type Move = z.infer<typeof MoveSchema>;
 
-export type RoomStatus = 'waiting' | 'playing' | 'ended';
+export type RoomStatus = 'waiting' | 'building' | 'playing' | 'ended';
 
 export type EndReason = 'finished' | 'abandoned' | 'idle' | 'opponent-left';
 
@@ -58,6 +64,8 @@ export interface RoomMessage {
   status: RoomStatus;
   /** Per seat: is somebody connected right now. */
   present: [boolean, boolean];
+  /** Per seat: has that seat submitted its built deck. Never the cards. */
+  decksReady: [boolean, boolean];
   /** Non-null while an opponent is inside the reconnect grace window. */
   reconnectDeadline: number | null;
 }
