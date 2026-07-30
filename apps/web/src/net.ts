@@ -1,4 +1,4 @@
-import { NET, type RedactedState, type ServerMessage } from '@caravan/protocol';
+import { NET, type Difficulty, type RedactedState, type ServerMessage } from '@caravan/protocol';
 import type { Move } from '@caravan/rules';
 
 export type Connectivity = 'connecting' | 'open' | 'closed';
@@ -80,8 +80,9 @@ export class CaravanClient {
     };
   }
 
-  createRoom(): void {
-    this.send({ t: 'create' });
+  /** With a difficulty, seat 1 is filled by the AI; without, it waits for a human. */
+  createRoom(bot?: Difficulty): void {
+    this.send({ t: 'create', bot });
   }
 
   joinRoom(code: string): void {

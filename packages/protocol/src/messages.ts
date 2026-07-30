@@ -7,6 +7,13 @@ import { z } from 'zod';
 
 export const RoomCode = z.string().regex(/^[A-Z]{4}$/);
 
+/**
+ * How hard the AI opponent plays. Absent from a `create` message means the room
+ * is an ordinary two-human table; the difficulty only exists for single player.
+ */
+export const DifficultySchema = z.enum(['easy', 'normal', 'hard']);
+export type Difficulty = z.infer<typeof DifficultySchema>;
+
 const Target = z.object({
   seat: z.union([z.literal(0), z.literal(1)]),
   caravan: z.union([z.literal(0), z.literal(1), z.literal(2)]),
@@ -24,7 +31,8 @@ export const MoveSchema = z.discriminatedUnion('type', [
 
 /** Client -> server. */
 export const ClientMessage = z.discriminatedUnion('t', [
-  z.object({ t: z.literal('create') }),
+  /** `bot` set means seat 1 is filled by the AI at that difficulty. */
+  z.object({ t: z.literal('create'), bot: DifficultySchema.optional() }),
   z.object({ t: z.literal('join'), code: RoomCode }),
   /** Reconnect into a seat held by an HMAC-signed token from localStorage. */
   z.object({ t: z.literal('resume'), token: z.string() }),

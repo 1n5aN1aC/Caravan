@@ -162,7 +162,7 @@ fixture.
 
 ## Not in v1
 
-Accounts, AI opponents, matchmaking, ranking, chat, spectators, rematch, a move
+Accounts, matchmaking, ranking, chat, spectators, rematch, a move
 log, persistence across restarts, and public hosting. The structure accommodates
 each without rework — see "Designed-for extensions" in [`plan.txt`](plan.txt). A
 server restart kills in-flight matches; that is accepted.
@@ -175,6 +175,42 @@ replay viewer would be built on.
 Deck building has left the list too, in its simplest possible form: no
 curation, no rarity, no swapping in cards you don't already own — trimming down
 from the full 54. See "Deck building" below.
+
+So has the AI opponent, in the same spirit — deliberately not clever. See
+"Single player" below.
+
+### Single player
+
+"Create a table" now asks what kind of table before opening one, because the
+deal depends on the answer: an opponent seat filled by the AI has to be filled
+before the cards go out. Choose the computer and you also choose a difficulty;
+choose another player and nothing about the room differs from before.
+
+The AI is a `Connection` occupying seat 1, so presence, room status, redaction
+and "that room is full" all keep working with no special cases, and its moves go
+in through the same `move` path a socket's do — re-validated by the engine and
+recorded in `room.moves`, so a solo match replays from `{ seed, decks, moves }`
+like any other. It plays the full 54 and submits that deck at create time, which
+leaves the deal waiting only on the host. It answers after a fixed delay
+(`BOT_DELAY_MS`) so the table does not snap.
+
+`chooseMove` (`apps/server/src/bot.ts`) is one ply and no search: it scores the
+moves `listLegalMoves` already offers by applying each one and asking how much
+closer the board is to the 21–26 band, and takes the best. Randomness comes from
+the engine's seeded PRNG, so the same position always yields the same choice.
+The difficulties differ in what they are allowed to consider, not how deep they
+look:
+
+- **easy** — random, but never disbands a caravan that was doing fine
+- **normal** — plays its own side, including Jacks on its own overburdened
+  caravans and Kings on its own near-selling ones, and ignores the opponent
+- **hard** — the same scorer with the opponent's board subtracted, which is the
+  whole of its offense. Destroying a 24 with a Jack and Kinging a 13 into an
+  unsellable 27 both fall out of that one sign flip — and so does the restraint,
+  since Kinging their 12 into a tidy 24 scores as the gift it is.
+
+Strategy lives in the server, not in `packages/rules`, which stays a statement
+of how the rules work and holds no opinions about how to win.
 
 ### Deck building
 

@@ -30,13 +30,15 @@ play a complete, correct match in their browsers. Nothing else.
 
 
 
-**Deliberately out of scope for v1:** accounts, AI opponents,
+**Deliberately out of scope for v1:** accounts,
 
 matchmaking, ranking, chat/emotes, spectators, rematch, animation, persistence
 
 across restarts, public hosting. Each is discussed under "Designed-for extensions."
 
-Deck building has since shipped and is no longer on this list — see the README.
+Deck building and a basic AI opponent have since shipped and are no longer on
+
+this list — see the README.
 
 
 
@@ -519,9 +521,11 @@ The v1 structure deliberately accommodates these without rework:
 
   are named config, not literals.
 
-- **AI opponent, accounts, matchmaking, spectators, rematch** — additive; none require
+- **Accounts, matchmaking, spectators, rematch** — additive; none require
 
-  changing the engine or the authority model.
+  changing the engine or the authority model. The AI opponent, since shipped,
+
+  bore this out: it is a `Connection` in seat 1 and changed neither.
 
 
 

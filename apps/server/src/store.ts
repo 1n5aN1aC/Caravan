@@ -1,10 +1,12 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { NET } from '@caravan/protocol';
+import { NET, type Difficulty } from '@caravan/protocol';
 import type { MatchState, Move, Seat } from '@caravan/rules';
 
 export interface Room {
   code: string;
   seed: string;
+  /** The AI's difficulty when seat 1 is a bot, null for a two-human table. */
+  bot: Difficulty | null;
   state: MatchState | null;
   /** Per seat: the built deck's kept card ids, or null while still building.
       Part of the replay record — the deal depends on it as much as the seed. */

@@ -5,6 +5,7 @@ import {
   useSyncExternalStore,
   type ReactElement,
 } from 'react';
+import type { Difficulty } from '@caravan/protocol';
 import { Board } from './Board.js';
 import { DeckBuilder } from './DeckBuilder.js';
 import { CaravanClient } from './net.js';
@@ -24,6 +25,9 @@ export function App() {
   const client = useMemo(() => new CaravanClient(), []);
   const state = useSyncExternalStore(client.subscribe, client.getSnapshot);
   const [code, setCode] = useState('');
+  // The table's options are chosen before the room exists, because the deal
+  // depends on them — an AI seat has to be filled before the cards go out.
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     client.connect();
@@ -93,9 +97,19 @@ export function App() {
         panel
       )}
 
-      {!seated && (
+      {!seated && creating && (
+        <TableOptions
+          onStart={(bot) => {
+            setCreating(false);
+            client.createRoom(bot);
+          }}
+          onBack={() => setCreating(false)}
+        />
+      )}
+
+      {!seated && !creating && (
         <section className="landing">
-          <button onClick={() => client.createRoom()}>Create a table</button>
+          <button onClick={() => setCreating(true)}>Create a table</button>
           <span className="or">or join one</span>
           <form
             onSubmit={(e) => {
@@ -130,6 +144,72 @@ export function App() {
 
       {state.match?.result && <Result result={state.match.result} you={state.match.seat} />}
     </main>
+  );
+}
+
+const DIFFICULTIES: Array<{ value: Difficulty; label: string; blurb: string }> = [
+  { value: 'easy', label: 'Easy', blurb: 'Plays more or less at random.' },
+  { value: 'normal', label: 'Normal', blurb: 'Builds its own caravans and leaves yours alone.' },
+  { value: 'hard', label: 'Hard', blurb: 'Builds its own, and wrecks yours with face cards.' },
+];
+
+/**
+ * What kind of table to open. Single player fills the second seat with the AI
+ * before the deal; multiplayer leaves it for whoever you give the code to. The
+ * difficulty only exists for the former, so it is only shown for the former.
+ */
+function TableOptions({
+  onStart,
+  onBack,
+}: {
+  onStart: (bot?: Difficulty) => void;
+  onBack: () => void;
+}) {
+  const [solo, setSolo] = useState(false);
+  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+
+  return (
+    <section className="options">
+      <h2>New table</h2>
+
+      <fieldset className="option-group">
+        <legend>Opponent</legend>
+        <label>
+          <input type="radio" checked={!solo} onChange={() => setSolo(false)} />
+          Another player
+        </label>
+        <label>
+          <input type="radio" checked={solo} onChange={() => setSolo(true)} />
+          Computer
+        </label>
+      </fieldset>
+
+      {solo && (
+        <fieldset className="option-group">
+          <legend>Difficulty</legend>
+          {DIFFICULTIES.map(({ value, label, blurb }) => (
+            <label key={value} title={blurb}>
+              <input
+                type="radio"
+                checked={difficulty === value}
+                onChange={() => setDifficulty(value)}
+              />
+              {label}
+              <small className="dim">{blurb}</small>
+            </label>
+          ))}
+        </fieldset>
+      )}
+
+      <div className="option-actions">
+        <button className="confirm" onClick={() => onStart(solo ? difficulty : undefined)}>
+          Start
+        </button>
+        <button className="ghost" onClick={onBack}>
+          Back
+        </button>
+      </div>
+    </section>
   );
 }
 

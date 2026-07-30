@@ -22,12 +22,28 @@ class TestConnection implements Connection {
 let now = 1_000_000;
 let hub: Hub;
 let store: InMemoryMatchStore;
+/** The AI's pending move, if one is queued. Nothing else uses the scheduler. */
+let pending: Array<() => void>;
 
 beforeEach(() => {
   now = 1_000_000;
+  pending = [];
   store = new InMemoryMatchStore();
-  hub = new Hub(store, new SeatTokens(), () => now);
+  hub = new Hub(store, new SeatTokens(), () => now, (fn) => {
+    pending.push(fn);
+    return () => {
+      pending = pending.filter((f) => f !== fn);
+    };
+  });
 });
+
+/** Runs whatever the bot had queued, which typically queues the next one. */
+function flushBot(): boolean {
+  const due = pending;
+  pending = [];
+  for (const fn of due) fn();
+  return due.length > 0;
+}
 
 function open(): TestConnection {
   return new TestConnection();
@@ -300,5 +316,73 @@ describe('protocol validation', () => {
       ClientMessage.safeParse({ t: 'move', move: { type: 'play', cardId: 'x' } }).success,
     ).toBe(false);
     expect(ClientMessage.safeParse({ t: 'join', code: 'ABCD' }).success).toBe(true);
+  });
+});
+
+describe('single player', () => {
+  /** A solo table: the host, and the AI already sitting in seat 1. */
+  function solo(): { host: TestConnection; code: string } {
+    const host = open();
+    hub.handle(host, { t: 'create', bot: 'normal' });
+    return { host, code: host.last('seated')!.code };
+  }
+
+  it('fills the second seat itself, so only the host still owes a deck', () => {
+    const { host } = solo();
+    const room = host.last('room')!;
+    expect(room.status).toBe('building');
+    expect(room.present).toEqual([true, true]);
+    expect(room.decksReady).toEqual([false, true]);
+  });
+
+  it('deals as soon as the host’s deck lands, with no second connection', () => {
+    const { host } = solo();
+    expect(host.last('state')).toBeUndefined();
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+    expect(host.last('state')).toBeDefined();
+    expect(host.last('room')!.status).toBe('playing');
+  });
+
+  it('refuses a second human at the table', () => {
+    const { code } = solo();
+    const intruder = open();
+    hub.handle(intruder, { t: 'join', code });
+    expect(intruder.last('error')!.message).toBe('that room is full');
+  });
+
+  it('plays a whole match against the host to a decided result', () => {
+    const { host, code } = solo();
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+
+    // The host plays the first legal move it is offered; the AI answers on its
+    // own timer. Between them the match has to reach a result and never stall.
+    for (let turn = 0; turn < 400; turn++) {
+      const room = store.get(code);
+      if (!room?.state || room.state.phase === 'over') break;
+      if (room.state.turn === 0) {
+        const [move] = listLegalMoves(room.state, 0);
+        expect(move).toBeDefined();
+        hub.handle(host, { t: 'move', move: move! });
+      } else {
+        // The AI owes a move here, and the only thing that can produce one is
+        // the timer the hub queued for it.
+        expect(flushBot()).toBe(true);
+      }
+    }
+
+    const state = host.last('state')!.state as RedactedState;
+    expect(state.result).not.toBeNull();
+    // Every AI move went through the ordinary move path, so the replay record
+    // holds both sides of the match, not just the host's half.
+    const moves = store.get(code)!.moves;
+    expect(moves.filter((m) => m.seat === 1).length).toBeGreaterThan(3);
+    expect(moves.some((m) => m.seat === 0)).toBe(true);
+  });
+
+  it('never queues a move while it is the host’s turn', () => {
+    const { host, code } = solo();
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+    while (store.get(code)!.state!.turn === 1) flushBot();
+    expect(pending).toHaveLength(0);
   });
 });

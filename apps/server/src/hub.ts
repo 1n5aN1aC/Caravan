@@ -3,18 +3,21 @@ import {
   redactEvents,
   redactFor,
   type ClientMessage,
+  type Difficulty,
   type EndReason,
   type ServerMessage,
 } from '@caravan/protocol';
 import {
   IllegalMoveError,
   applyMove,
+  buildDeck,
   checkDeckSelection,
   createMatch,
   type GameEvent,
   type Move,
   type Seat,
 } from '@caravan/rules';
+import { chooseMove } from './bot.js';
 import {
   InMemoryMatchStore,
   SeatTokens,
@@ -28,6 +31,29 @@ export interface Connection {
   send(message: ServerMessage): void;
   close(): void;
 }
+
+/**
+ * The AI's seat. It is a `Connection` purely so it occupies seat 1 the way a
+ * socket would — presence, room status and "that room is full" all keep working
+ * with no special cases. It is never actually sent anything: the bot is driven
+ * from `room.state` after each move, not from redacted messages, because it has
+ * to hand real state to the engine to score a move.
+ */
+class BotConnection implements Connection {
+  send(): void {}
+  close(): void {}
+}
+
+/** Runs `fn` after `ms`, returning a cancel. Injected so tests need no clock. */
+export type Scheduler = (fn: () => void, ms: number) => () => void;
+
+const realScheduler: Scheduler = (fn, ms) => {
+  const id = setTimeout(fn, ms);
+  return () => clearTimeout(id);
+};
+
+/** How long the AI "thinks" before playing, so the table does not snap. */
+export const BOT_DELAY_MS = 800;
 
 interface Session {
   connection: Connection;
@@ -43,11 +69,14 @@ export class Hub {
   private sessions = new Map<Connection, Session>();
   /** code -> connection per seat. */
   private seats = new Map<string, [Connection | null, Connection | null]>();
+  /** code -> cancel for the pending AI move, so one is never queued twice. */
+  private botTimers = new Map<string, () => void>();
 
   constructor(
     private readonly store: MatchStore = new InMemoryMatchStore(),
     private readonly tokens = new SeatTokens(),
     private readonly now: () => number = Date.now,
+    private readonly schedule: Scheduler = realScheduler,
   ) {}
 
   handle(connection: Connection, message: ClientMessage): void {
@@ -55,7 +84,7 @@ export class Hub {
       case 'ping':
         return connection.send({ t: 'pong' });
       case 'create':
-        return this.create(connection);
+        return this.create(connection, message.bot);
       case 'join':
         return this.join(connection, message.code);
       case 'resume':
@@ -108,11 +137,12 @@ export class Hub {
 
   // -- room lifecycle -------------------------------------------------------
 
-  private create(connection: Connection): void {
+  private create(connection: Connection, bot?: Difficulty): void {
     const code = generateCode((c) => this.store.get(c) !== undefined);
     const room: Room = {
       code,
       seed: generateSeed(),
+      bot: bot ?? null,
       state: null,
       decks: [null, null],
       moves: [],
@@ -124,7 +154,18 @@ export class Hub {
     this.store.create(room);
     this.seats.set(code, [connection, null]);
     this.seat(connection, room, 0);
-    this.broadcastRoom(room);
+
+    // Single player: the AI takes seat 1 immediately and plays the full 54, so
+    // the only thing the deal is still waiting on is the host's own deck.
+    if (bot) {
+      const botConnection = new BotConnection();
+      room.claimed[1] = true;
+      room.decks[1] = buildDeck(1).map((card) => card.id);
+      this.seats.get(code)![1] = botConnection;
+      this.sessions.set(botConnection, { connection: botConnection, code, seat: 1 });
+    }
+
+    this.maybeStart(room);
   }
 
   private join(connection: Connection, code: string): void {
@@ -217,6 +258,8 @@ export class Hub {
 
   private endRoom(room: Room, reason: EndReason): void {
     room.ended = true;
+    this.botTimers.get(room.code)?.();
+    this.botTimers.delete(room.code);
     for (const connection of this.seats.get(room.code) ?? []) {
       connection?.send({ t: 'ended', reason });
     }
@@ -281,6 +324,35 @@ export class Hub {
       if (connection) this.sendState(connection, room, seat, events);
     });
     if (room.state?.phase === 'over') room.ended = true;
+    this.scheduleBot(room);
+  }
+
+  /**
+   * Queues the AI's reply whenever the position has come round to its seat. The
+   * move goes back in through the ordinary `move` path, so it is re-validated by
+   * the engine and recorded in `room.moves` exactly like a human's — a solo match
+   * replays from seed + decks + moves the same as any other.
+   */
+  private scheduleBot(room: Room): void {
+    this.botTimers.get(room.code)?.();
+    this.botTimers.delete(room.code);
+    if (!room.bot || room.ended || !room.state) return;
+    if (room.state.turn !== 1 || room.state.phase === 'over') return;
+
+    const connection = this.seats.get(room.code)?.[1];
+    if (!connection) return;
+
+    const cancel = this.schedule(() => {
+      this.botTimers.delete(room.code);
+      // The room may have ended, or the turn moved on, while this was pending.
+      const current = this.store.get(room.code);
+      if (!current?.state || current.ended) return;
+      if (current.state.turn !== 1 || current.state.phase === 'over') return;
+      const move = chooseMove(current.state, 1, room.bot!);
+      if (move) this.move(connection, move);
+    }, BOT_DELAY_MS);
+
+    this.botTimers.set(room.code, cancel);
   }
 
   /** The only path by which match state reaches a socket. */
