@@ -6,6 +6,7 @@
  *   assets/sounds/addtotrack/*.mp3   a card landing on a caravan
  *   assets/sounds/removecard/*.mp3   a card forced off one — Jack or Joker
  *   assets/sounds/addremove/*.mp3    a card you chose to give up — discard or disband
+ *   assets/sounds/addtodeck/*.mp3    a card selected or deselected while building a deck
  *   assets/sounds/startgame/*.mp3    the board arriving
  *   assets/sounds/win/*.mp3          the match decided, your way
  *   assets/sounds/lose/*.mp3         the match decided, theirs
@@ -15,14 +16,24 @@
  * with no files is silent, which means an empty folder changes nothing.
  */
 
-const modules = import.meta.glob('./assets/sounds/**/*.{mp3,ogg,m4a,wav,webm}', {
+import { createToggle } from './audioToggle.js';
+
+const modules = import.meta.glob('./assets/sounds/**/*.{mp3,ogg,m4a,wav,webm,opus}', {
   eager: true,
   query: '?url',
   import: 'default',
 }) as Record<string, string>;
 
 /** The cues the game fires. A folder named anything else is ignored. */
-export const CUES = ['addtotrack', 'removecard', 'addremove', 'startgame', 'win', 'lose'] as const;
+export const CUES = [
+  'addtotrack',
+  'removecard',
+  'addremove',
+  'addtodeck',
+  'startgame',
+  'win',
+  'lose',
+] as const;
 export type Cue = (typeof CUES)[number];
 
 const takes = new Map<Cue, string[]>(CUES.map((cue) => [cue, []]));
@@ -38,40 +49,14 @@ for (const list of takes.values()) list.sort();
 /** How loud cues play. Card sounds are punctuation, not the main event. */
 const VOLUME = 0.55;
 
-const MUTE_KEY = 'caravan.sound';
-
-let enabled = readEnabled();
-const listeners = new Set<() => void>();
-
-function readEnabled(): boolean {
-  try {
-    return localStorage.getItem(MUTE_KEY) !== 'off';
-  } catch {
-    // Private-mode storage can throw on read as well as write.
-    return true;
-  }
-}
-
 /**
  * Whether cues are audible, as a store `useSyncExternalStore` can read. The
- * choice is remembered, because a player who mutes the cards means it.
+ * choice is remembered, because a player who mutes the cards means it. It
+ * covers the cues only — the ambience loop and the music each mute separately,
+ * in `music.ts`.
  */
 export const sound = {
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener);
-    return () => listeners.delete(listener);
-  },
-  isEnabled: (): boolean => enabled,
-  setEnabled(next: boolean): void {
-    if (next === enabled) return;
-    enabled = next;
-    try {
-      localStorage.setItem(MUTE_KEY, next ? 'on' : 'off');
-    } catch {
-      // Not being able to remember the setting is no reason to ignore it.
-    }
-    for (const listener of listeners) listener();
-  },
+  ...createToggle('caravan.sound'),
   /** True when any cue has at least one file behind it. */
   available: (): boolean => [...takes.values()].some((list) => list.length > 0),
 };
@@ -103,7 +88,7 @@ function preload(url: string): HTMLAudioElement {
  * a silent card — not a broken board.
  */
 export function playCue(cue: Cue): void {
-  if (!enabled) return;
+  if (!sound.isEnabled()) return;
   const list = takes.get(cue);
   if (!list || list.length === 0) return;
 
@@ -131,7 +116,7 @@ export function playCue(cue: Cue): void {
  * import time so a spectator sitting on the landing page pays nothing for it.
  */
 export function primeSounds(): void {
-  if (!enabled) return;
+  if (!sound.isEnabled()) return;
   for (const list of takes.values()) for (const url of list) preload(url);
 }
 

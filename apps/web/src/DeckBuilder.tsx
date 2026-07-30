@@ -50,13 +50,13 @@ export function DeckBuilder({
       const next = new Set(current);
       if (next.has(id)) {
         next.delete(id);
-        playCue('addtotrack');
+        playCue('addtodeck');
       } else {
         // Recounted against `next`, not the render's `kept`, so a burst of
         // clicks cannot race past the floor.
         if (all.length - next.size <= RULES.MIN_DECK_SIZE) return current;
         next.add(id);
-        playCue('addremove');
+        playCue('addtodeck');
       }
       return next;
     });

@@ -120,6 +120,21 @@ h1 {
   border-radius: 50%;
   background: currentColor;
 }
+/*
+ * The audio buttons take a line of their own — a full-width flex item in a
+ * wrapping panel is a row break — so the group is never split across two lines.
+ * Right-aligned to sit under the session controls it used to share a line with.
+ */
+.panel .audio {
+  /* `flex-basis: 100%` alone is not enough: a shrinkable item squeezes onto the
+     line above instead of taking one. `0 0 100%` is what actually breaks it. */
+  flex: 0 0 100%;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 /* An icon button, so it stays a glyph rather than a word-shaped button. */
 .mute {
   padding: 0.3rem 0.45rem;

@@ -8,6 +8,7 @@ needs changing.
 addtotrack/   a card landing on a caravan
 removecard/   a card forced off one — Jack or Joker
 addremove/    a card given up on purpose — discard, or a whole caravan disbanded
+addtodeck/    a card selected or deselected while building a deck
 startgame/    the board appearing
 win/          the match decided, your way
 lose/         the match decided, theirs
@@ -59,6 +60,30 @@ immediately too, the same way.
 
 `src/sound.ts` owns loading, the random pick, and the mute setting (remembered in
 `localStorage` under `caravan.sound`).
+
+## Ambience and music
+
+Two sibling folders hold the audio that is always there rather than fired by a
+move, loaded the same way by `src/music.ts`:
+
+```
+../ambience/   one file, looped forever under everything
+../music/      a playlist
+```
+
+The music plays a track picked at random, then a random *different* one when
+that finishes, forever. Track names come from the filenames, with a leading
+`MUS_` and any underscores tidied away, and show in the button's tooltip.
+
+Each has its own mute in the header, independent of the card cues
+(`caravan.ambience` and `caravan.music`), plus a skip button that appears while
+the music is playing. Either folder being empty hides its own control and
+changes nothing else.
+
+Neither can start on its own: browsers refuse unprompted audio until the page
+has been interacted with, so the first click or keypress anywhere is what begins
+playback. Volumes are `AMBIENCE_VOLUME` and `MUSIC_VOLUME` in `src/music.ts`,
+both set below the cues so the cues stay the thing you hear.
 
 ## Importing a pack
 

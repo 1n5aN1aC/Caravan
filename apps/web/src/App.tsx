@@ -9,6 +9,7 @@ import { Board } from './Board.js';
 import { DeckBuilder } from './DeckBuilder.js';
 import { CaravanClient } from './net.js';
 import { sound } from './sound.js';
+import { ambience, music } from './music.js';
 
 /**
  * Landing page, board, and the connection chrome around both.
@@ -64,8 +65,9 @@ export function App() {
 
       <span className="spacer" />
       <span className={`conn conn-${state.connectivity}`}>{state.connectivity}</span>
-      <MuteToggle />
       {seated && <button onClick={() => client.leave()}>Leave</button>}
+
+      <AudioControls />
 
       {state.error && <p className="error">{state.error}</p>}
     </section>
@@ -151,6 +153,21 @@ function Result({
 
 
 /**
+ * The audio controls, kept together on a line of their own. There are enough of
+ * them now that sharing the panel's top line meant wrapping mid-group, splitting
+ * the music mute from its own skip button.
+ */
+function AudioControls() {
+  return (
+    <div className="audio">
+      <MuteToggle />
+      <AmbienceToggle />
+      <MusicControls />
+    </div>
+  );
+}
+
+/**
  * Silences the card sounds. Hidden outright when no sound files are bundled, so
  * a build without them shows no control for something that cannot make noise.
  * The setting is remembered across sessions by the store behind it.
@@ -167,8 +184,57 @@ function MuteToggle() {
       onClick={() => sound.setEnabled(!enabled)}
     >
       <span aria-hidden="true">{enabled ? '🔊' : '🔇'}</span>
-      <span className="sr-only">{enabled ? 'Mute sound' : 'Unmute sound'}</span>
+      <span className="sr-only">{enabled ? 'Mute card sounds' : 'Unmute card sounds'}</span>
     </button>
+  );
+}
+
+/** Silences the room tone. Hidden when no ambience file is bundled. */
+function AmbienceToggle() {
+  const enabled = useSyncExternalStore(ambience.subscribe, ambience.isEnabled);
+  if (!ambience.available()) return null;
+  return (
+    <button
+      type="button"
+      className="mute"
+      aria-pressed={!enabled}
+      title={enabled ? 'Mute ambience' : 'Unmute ambience'}
+      onClick={() => ambience.setEnabled(!enabled)}
+    >
+      <span aria-hidden="true">{enabled ? '🌬️' : '💤'}</span>
+      <span className="sr-only">{enabled ? 'Mute ambience' : 'Unmute ambience'}</span>
+    </button>
+  );
+}
+
+/**
+ * The radio: a mute, and a skip that only appears while it is playing — there is
+ * nothing to skip to when the music is off. The title carries the track name,
+ * which is the only place the playlist is visible at all.
+ */
+function MusicControls() {
+  const enabled = useSyncExternalStore(music.subscribe, music.isEnabled);
+  const track = useSyncExternalStore(music.subscribeNowPlaying, music.nowPlaying);
+  if (!music.available()) return null;
+  return (
+    <>
+      <button
+        type="button"
+        className="mute"
+        aria-pressed={!enabled}
+        title={enabled ? `Mute music${track ? ` — ${track.title}` : ''}` : 'Unmute music'}
+        onClick={() => music.setEnabled(!enabled)}
+      >
+        <span aria-hidden="true">{enabled ? '🎵' : '🔕'}</span>
+        <span className="sr-only">{enabled ? 'Mute music' : 'Unmute music'}</span>
+      </button>
+      {enabled && (
+        <button type="button" className="mute" title="Next track" onClick={() => music.next()}>
+          <span aria-hidden="true">⏭️</span>
+          <span className="sr-only">Next track</span>
+        </button>
+      )}
+    </>
   );
 }
 
