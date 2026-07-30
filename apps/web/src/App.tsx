@@ -7,6 +7,7 @@ import {
 } from 'react';
 import { Board } from './Board.js';
 import { CaravanClient } from './net.js';
+import { sound } from './sound.js';
 
 /**
  * Landing page, board, and the connection chrome around both.
@@ -54,6 +55,7 @@ export function App() {
 
       <span className="spacer" />
       <span className={`conn conn-${state.connectivity}`}>{state.connectivity}</span>
+      <MuteToggle />
       {seated && <button onClick={() => client.leave()}>Leave</button>}
 
       {state.error && <p className="error">{state.error}</p>}
@@ -128,6 +130,28 @@ function Result({
   );
 }
 
+
+/**
+ * Silences the card sounds. Hidden outright when no sound files are bundled, so
+ * a build without them shows no control for something that cannot make noise.
+ * The setting is remembered across sessions by the store behind it.
+ */
+function MuteToggle() {
+  const enabled = useSyncExternalStore(sound.subscribe, sound.isEnabled);
+  if (!sound.available()) return null;
+  return (
+    <button
+      type="button"
+      className="mute"
+      aria-pressed={!enabled}
+      title={enabled ? 'Mute card sounds' : 'Unmute card sounds'}
+      onClick={() => sound.setEnabled(!enabled)}
+    >
+      <span aria-hidden="true">{enabled ? '🔊' : '🔇'}</span>
+      <span className="sr-only">{enabled ? 'Mute sound' : 'Unmute sound'}</span>
+    </button>
+  );
+}
 
 function Seats({ present, you }: { present: [boolean, boolean]; you: 0 | 1 }) {
   return (

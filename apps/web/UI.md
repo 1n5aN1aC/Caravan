@@ -19,6 +19,9 @@ many cards are actually on the table, which CSS cannot compute — those live in
 | `src/layout.ts` | The numbers CSS cannot work out for itself |
 | `src/useCardDrag.ts` | Drag-to-play, on pointer events |
 | `src/useDepartures.ts` | Keeping destroyed cards alive long enough to animate out |
+| `src/useOpponentHand.ts` | Inventing a stable face-down stand-in for the redacted hand |
+| `src/sound.ts` | Loading sound files, the random take, the mute setting |
+| `src/useSoundCues.ts` | Deciding which sound a snapshot means |
 | `src/styles.css` | Everything else |
 
 ## The layout
@@ -51,6 +54,21 @@ visible at the far end.
 
 The `.gauge` between them carries both totals and the track state. Caravans have
 no header of their own.
+
+The hand column holds the opponent's hand too — `.opp-hand`, a fan of face-down
+cards above your own fan. The cards themselves are redacted (the snapshot only
+carries `handCount`), so `useOpponentHand.ts` invents stable stand-ins: each
+held card gets a persistent key and a randomly chosen back, and when the
+opponent spends a card, one *specific* back leaves rather than the whole fan
+reshuffling. Which one is random — the client genuinely does not know which
+card left. The subtle part is detecting the spend at all: a play is usually
+followed by a draw in the same snapshot, so `handCount` often does not move;
+the hook infers spends from `hand + deck` dropping (nothing else moves cards
+out of that pool) and draws from the hand count then recovering. The count is
+still authoritative — a snapshot the arithmetic cannot explain converges to it
+rather than drifting. `.opp-hand` fans with the same per-card angle as `.hand`
+but pivots from *above* (`transform-origin: 50% -220%`), so it arcs the way the
+back of a hand held across the table actually reads.
 
 ## Interaction
 
@@ -148,6 +166,62 @@ That is why highlight rings on art cards are `drop-shadow` filters rather than
 `box-shadow`: a box-shadow would trace the element box, not the card.
 
 See `src/assets/cards/README.md` for naming and the import scripts.
+
+## Sound
+
+`sound.ts` globs `src/assets/sounds/**` the same way, but groups by **folder**
+rather than filename: one folder per cue, however many interchangeable takes
+inside, picked at random and never twice running. Empty folders are silent, and
+the mute button in the panel hides itself when nothing is bundled.
+
+`useSoundCues.ts` has two triggers, not one, because one source cannot serve
+both seats:
+
+- **The mover hears `predict`.** `Board`'s `fire` calls it synchronously, before
+  `onMove` even reaches the socket. It runs the move through the same shared
+  engine used for legality (`applyMove` on `hydrateForClient(view)`) and plays
+  off *that* result. On a laggy connection this is the difference between the
+  sound landing with your click and it landing hundreds of milliseconds later
+  with the server's echo — which is what it replaced.
+- **Everyone hears the snapshot diff.** The effect that watches `view` still
+  diffs consecutive snapshots, and it is the only source for the opponent's
+  moves — there is nothing to predict from for a move nobody here has chosen.
+  For the mover, it is also the fallback: `predict` advances the same
+  `previous` ref its diff reads from, so a correctly predicted move's echo
+  diffs to nothing and is not replayed, while a move that lands differently
+  than predicted (a desync — not expected, but the ref is only ever advisory)
+  is still caught and heard for real.
+
+One cue per direction, not one per card: a Joker clearing three cards is one
+`removecard`, and a move that both attaches and destroys fires both. The
+bookends ride the same two paths — `startgame` on the first snapshot (nothing to
+predict a board arriving from); `win`/`lose` from whichever trigger notices the
+result first, `predict` if the deciding move was this seat's own, the diff
+otherwise, always after that move's own cue rather than in place of it.
+
+`removecard` means a Jack or a Joker took the card — against its owner's will.
+A voluntary discard or disband is `addremove` instead, and `predict` is the only
+place that can tell them apart: it branches on `move.type` directly rather than
+diffing the table, since a discard never touches the table (nothing to diff)
+and a disband's removal would otherwise look identical to a Jack's. This is also
+why an opponent's disband still plays as `removecard` — the diff has no move to
+read, only card ids that disappeared — and an opponent's discard stays
+inaudible, matching how little the client is told about the other side's hand.
+
+Four things worth knowing before editing it. The **first snapshot sounds only
+`startgame`** — joining or reconnecting to a match in progress would otherwise
+replay every card on the board at once, and a match that has already ended would
+replay its own outcome. **A draw is silent**, having no side to congratulate.
+**`predict` never throws** — a rejected `applyMove` is swallowed, since a
+prediction is advisory and the board only ever fires moves it already asked
+`listLegalMoves` for. And `play()` returns a promise in browsers but nothing
+under jsdom, so the rejection handler is attached defensively; browsers also
+refuse to play before the page has been interacted with, which is swallowed
+rather than reported — `startgame` gets away with it because clicking **Create a
+table** is that interaction.
+
+See `src/assets/sounds/README.md` for the folder layout and the encoding
+one-liner.
 
 ## Known loose ends
 

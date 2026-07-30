@@ -69,8 +69,10 @@ Each of the three tracks is a column, and both players build **outward from a
 shared centre line**: the first card of a caravan sits against the middle, and
 the newest — the one that decides what may legally follow — is the fully visible
 card at the far end. The two totals face each other across the track they are
-contesting. Your hand is fanned beside the table; face cards played onto a
-number card lie over it, offset far enough to leave the number readable.
+contesting. Your hand is fanned beside the table, the opponent's fanned face
+down above it — every hidden card wears a randomly chosen casino back, and when
+they spend one, one back leaves the fan. Face cards played onto a number card
+lie over it, offset far enough to leave the number readable.
 
 A card is played either by clicking it and then clicking its destination, or by
 dragging it there. Both routes ask `listLegalMoves` for that card's destinations
@@ -115,6 +117,26 @@ gives a playable deck. See [that folder's README](apps/web/src/assets/cards/READ
 for the naming rules, the import and downscaling scripts, and the licensing note:
 the shipped art is Bethesda's and carries no redistribution licence, which is
 worth weighing before forking.
+
+### Sound
+
+Cards are audible: a card landing on a caravan, a Jack or Joker forcing one off,
+a discard or disband given up on purpose, and single stings for the table
+opening and for the match being won or lost. The card cues hold several takes
+each and pick between them at random, so a long game does not turn into the same
+click over and over.
+
+Your own move sounds the instant you make it — it does not wait on a round trip
+to the server, so it is not held hostage by your own connection the way it would
+be if it only fired on the server's reply. The opponent's moves still come from
+watching the board change, since there is nothing else to go on for a move you
+did not make. The speaker button in the session panel mutes all of it for good.
+
+To use different sounds, replace the folders in `apps/web/src/assets/sounds/` —
+one folder per cue, any filenames, any number of takes. An empty folder is silent
+and hides the mute button. See [that folder's README](apps/web/src/assets/sounds/README.md)
+for the layout, the encoding one-liner, and the same licensing note as the art:
+the shipped audio is Bethesda's.
 
 ### Terminology
 

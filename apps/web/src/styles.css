@@ -120,6 +120,26 @@ h1 {
   border-radius: 50%;
   background: currentColor;
 }
+/* An icon button, so it stays a glyph rather than a word-shaped button. */
+.mute {
+  padding: 0.3rem 0.45rem;
+  line-height: 1;
+  font-size: 0.9rem;
+}
+.mute[aria-pressed='true'] { opacity: 0.6; }
+
+/* Label text for anything whose meaning is carried by a glyph. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .conn-open { color: #6fd08c; }
 .conn-connecting { color: var(--gold); }
 .conn-closed { color: var(--danger); }
@@ -264,24 +284,6 @@ input {
   padding: 0.1rem 0.5rem;
   border-radius: 1rem;
   background: rgba(0, 0, 0, 0.28);
-}
-
-/* A miniature card back, so "in hand" reads at a glance. */
-.facedown {
-  width: 0.7rem;
-  height: 1rem;
-  border-radius: 2px;
-  border: 1px solid #2b1a3a;
-  background:
-    repeating-linear-gradient(45deg, #6a3fa0 0 3px, #52307d 3px 6px);
-}
-/* The drawn stand-in above needs its own decoration; a real back image brings
-   its own, and a transparent one must not sit on top of that gradient. */
-img.facedown {
-  border: none;
-  background: none;
-  object-fit: contain;
-  width: 0.8rem;
 }
 
 /* One column per track, each a mirrored pair of caravans meeting in the middle.
@@ -632,6 +634,48 @@ img.facedown {
 .drop.target { border-color: var(--gold); border-style: solid; }
 .drop:disabled { opacity: 0.25; }
 .disband { font-size: 0.62rem; padding: 0.2rem 0.5rem; }
+
+/* -- opponent's hand ---------------------------------------------------- */
+
+/*
+ * The opponent's held cards, face down above your own fan. Same construction as
+ * `.hand` — one shared position, one rotation per card — but the pivot sits
+ * *above* the fan, so the cards splay the other way: highest at the edges,
+ * dipping in the middle, the way the back of a hand held across the table
+ * actually reads.
+ */
+/* Face-down cards are the same size as the held hand's (`--card-lw`/`--card-lh`),
+   so the two fans read as the same objects seen from opposite sides. */
+.opp-hand {
+  position: relative;
+  height: calc(var(--card-lh) * 1.08);
+}
+
+.opp-card {
+  position: absolute;
+  top: 0.4rem;
+  left: 50%;
+  margin-left: calc(var(--card-lw) / -2);
+  transform-origin: 50% -220%;
+  transform: rotate(var(--a));
+  z-index: var(--z);
+  /* Survivors slide into their new fan positions when one card leaves. */
+  transition: transform 260ms ease;
+}
+
+.opp-card .card-back {
+  display: block;
+  width: var(--card-lw);
+  height: var(--card-lh);
+  object-fit: contain;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.45));
+}
+/* Stand-in for a build with no back images bundled. */
+.opp-card .card-back.drawn {
+  border-radius: var(--radius);
+  border: 1px solid #2b1a3a;
+  background: repeating-linear-gradient(45deg, #6a3fa0 0 4px, #52307d 4px 8px);
+}
 
 /* -- hand -------------------------------------------------------------- */
 

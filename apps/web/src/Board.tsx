@@ -11,11 +11,12 @@ import {
   type Seat,
 } from '@caravan/rules';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
-import { cardBackUrl } from './cardArt.js';
 import { fanAngle, overlapStep, STACK_ROWS } from './layout.js';
 import { PlayingCard } from './PlayingCard.js';
 import { useCardDrag } from './useCardDrag.js';
 import { useDepartures } from './useDepartures.js';
+import { useOpponentHand } from './useOpponentHand.js';
+import { useSoundCues } from './useSoundCues.js';
 
 /**
  * The table, laid out the way the cards would actually sit.
@@ -62,10 +63,19 @@ export function Board({
 }) {
   const [selected, setSelected] = useState<string | null>(null);
 
+  // Cards landing on and leaving the table, heard for both players. `predict`
+  // sounds this seat's own moves the instant they are chosen, rather than
+  // waiting for the server to echo them back — see useSoundCues.ts.
+  const predictSound = useSoundCues(view);
+
   const you = view.seat;
   const them: Seat = you === 0 ? 1 : 0;
   const yourTurn = view.turn === you && view.phase !== 'over' && !frozen;
   const hand = view.players[you].hand ?? [];
+  const theirHand = useOpponentHand(
+    view.players[them].handCount,
+    view.players[them].deckCount,
+  );
 
   // One hydration per snapshot, shared by legality, track and status queries.
   const engine = useMemo(() => hydrateForClient(view), [view]);
@@ -99,9 +109,10 @@ export function Board({
   const fire = useCallback(
     (move: Move) => {
       setSelected(null);
+      predictSound(engine, you, move);
       onMove(move);
     },
-    [onMove],
+    [onMove, predictSound, engine, you],
   );
 
   const isTarget = useCallback(
@@ -191,20 +202,35 @@ export function Board({
       </div>
 
       <aside className="hand-area">
-        {/* The opponent's counts live over here rather than over their cards:
-            they are read alongside your own hand and deck, not the table. */}
+        {/* The opponent's hand lives over here rather than over their cards:
+            it is read alongside your own hand and deck, not the table. */}
         <p className="table-head">
           <span className="who">Opponent</span>
-          <span className="pill">
-            {cardBackUrl ? (
-              <img className="facedown" src={cardBackUrl} alt="" aria-hidden="true" />
-            ) : (
-              <span className="facedown" aria-hidden="true" />
-            )}
-            {view.players[them].handCount} in hand
-          </span>
           <span className="pill">{view.players[them].deckCount} in deck</span>
         </p>
+
+        {/* Their held cards, face down. What the cards are is redacted; the fan
+            shows how many, and one specific back leaves when they spend one —
+            see useOpponentHand for how much of this is (honest) invention. */}
+        <div
+          className="opp-hand"
+          role="img"
+          aria-label={`Opponent holds ${theirHand.length} card${theirHand.length === 1 ? '' : 's'}`}
+        >
+          {theirHand.map((held, i) => (
+            <span
+              key={held.key}
+              className="opp-card"
+              style={{ '--a': `${fanAngle(i, theirHand.length)}deg`, '--z': i } as never}
+            >
+              {held.back ? (
+                <img className="card-back" src={held.back} alt="" draggable={false} />
+              ) : (
+                <span className="card-back drawn" />
+              )}
+            </span>
+          ))}
+        </div>
 
         <p className={`turn ${yourTurn ? 'yours' : ''}`}>
           {view.phase === 'over' || frozen
