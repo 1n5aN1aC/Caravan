@@ -65,10 +65,17 @@ export function redactFor(seat: Seat, state: MatchState): RedactedState {
 /**
  * The mirror of `redactFor`: rebuilds a MatchState the rules engine will accept,
  * so the client can ask the shared engine which moves are legal without a
- * round-trip. The opponent's hand is genuinely unknown and comes back empty,
- * and decks become placeholders of the right length — neither affects the
- * legality of a move by the receiving seat. This is advisory UI only; the
+ * round-trip. Which cards the opponent holds is genuinely unknown, so their
+ * hand — like their deck and discard — becomes placeholders. None of it affects
+ * the legality of a move by the receiving seat. This is advisory UI only; the
  * server re-validates everything anyway.
+ *
+ * The placeholders are of the right *length*, and that matters: `handCount` is
+ * public, and a rule that asks whether a player has run out of cards must not
+ * read a redacted hand as an empty one. That is the difference between "I know
+ * nothing about these cards" and "there are no cards", and hydrating the
+ * opponent's hand as `[]` conflated the two — every move the client predicted
+ * ended the match on the spot.
  */
 export function hydrateForClient(view: RedactedState): MatchState {
   const players = ([0, 1] as Seat[]).map((s) => {
@@ -80,7 +87,14 @@ export function hydrateForClient(view: RedactedState): MatchState {
         suit: 'S' as const,
         owner: s,
       })),
-      hand: p.hand ?? [],
+      hand:
+        p.hand ??
+        Array.from({ length: p.handCount }, (_, i) => ({
+          id: `p${s}:unknown-hand-${i}`,
+          rank: '5' as const,
+          suit: 'S' as const,
+          owner: s,
+        })),
       discard: Array.from({ length: p.discardCount }, (_, i) => ({
         id: `p${s}:unknown-discard-${i}`,
         rank: '5' as const,

@@ -117,19 +117,20 @@ export function useSoundCues(view: RedactedState): (before: MatchState, seat: Se
     const gameOver = outcome.events.find((e) => e.type === 'gameOver');
     if (gameOver && gameOver.type === 'gameOver') {
       // `before` is a locally hydrated view, and the opponent's hand in it is
-      // always empty — hands are redacted, and hydrateForClient fills the gap
-      // with `[]` (protocol/redact.ts), which that file notes is safe for our
-      // *own* legality only. `applyMove` here also runs `evaluateMatch`, which
-      // — after our move — asks whether the *opponent* has any legal move
-      // left. Judged against their faked-empty hand that can only ever go one
-      // way: during the opening round especially, where disbanding isn't even
-      // legal yet, this looks like exhaustion after nearly any first move,
-      // regardless of what is actually in their hand. `tracks` and `turn-cap`
-      // depend on nothing but public information (caravan values, ply count)
-      // and stay exact either way; only `no-legal-move` is skipped here and
-      // left for the snapshot diff below to confirm once the server's own
-      // state — which does know the opponent's hand — actually arrives.
-      const trustworthy = gameOver.result.reason !== 'no-legal-move';
+      // placeholders — hands are redacted, and hydrateForClient invents cards
+      // of the right *count* but not the right faces (protocol/redact.ts).
+      // `applyMove` here also runs `evaluateMatch`, which — after our move —
+      // asks whether the *opponent* has any legal move left, or has run out of
+      // cards. `tracks` and `turn-cap` depend on nothing but public
+      // information (caravan values, ply count) and stay exact. So does
+      // `empty-hand`, now that the count is honest; it is still left to the
+      // echo so that every verdict resting on the opponent's hand is reached
+      // in one place. `no-legal-move` genuinely cannot be judged here, since
+      // legality depends on the faces we do not have. Both are left for the
+      // snapshot diff below to confirm once the server's own state — which
+      // does know the opponent's hand — arrives.
+      const trustworthy =
+        gameOver.result.reason !== 'no-legal-move' && gameOver.result.reason !== 'empty-hand';
       if (trustworthy) {
         // Marked here, ahead of the snapshot that will confirm it, so the
         // effect above does not replay this sting a second time when that

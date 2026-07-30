@@ -167,7 +167,7 @@ describe('exhaustion', () => {
     expect(evaluateMatch(state)).toEqual({
       kind: 'winner',
       seat: 0,
-      reason: 'no-legal-move',
+      reason: 'empty-hand',
     });
   });
 
@@ -184,14 +184,18 @@ describe('exhaustion', () => {
     expect(state.result).toBeNull();
   });
 
-  it('still counts a disband as a legal action when the hand is empty', () => {
+  it('loses on an empty hand even with a caravan still standing to disband', () => {
     const state = scenario({
       turn: 1,
       p0: { caravans: [V15, '', ''], hand: '3C', deckSize: 5 },
       p1: { caravans: ['5S', '', ''], hand: '', deckSize: 0 },
     });
     expect(listLegalMoves(state, 1)).toEqual([{ type: 'disband', caravan: 0 }]);
-    expect(evaluateMatch(state)).toBeNull();
+    expect(evaluateMatch(state)).toEqual({
+      kind: 'winner',
+      seat: 0,
+      reason: 'empty-hand',
+    });
   });
 });
 

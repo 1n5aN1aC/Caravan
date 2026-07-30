@@ -75,8 +75,9 @@ export function caravanStatus(
 
 /**
  * Called after a move has been applied and the turn has passed. Checks, in
- * order: all tracks decided, the hard turn cap, then whether the player about
- * to move has any legal action at all.
+ * order: all tracks decided, the hard turn cap, whether the player about to
+ * move has run out of cards (an automatic loss, even with a caravan still
+ * standing to disband), then whether they have any legal action at all.
  */
 export function evaluateMatch(state: MatchState): MatchResult | null {
   const trackWin = resolveTrackWin(state);
@@ -85,6 +86,9 @@ export function evaluateMatch(state: MatchState): MatchResult | null {
   if (state.ply >= RULES.MAX_PLIES) return { kind: 'draw', reason: 'turn-cap' };
 
   const toMove: Seat = state.turn;
+  if (state.players[toMove].hand.length === 0) {
+    return { kind: 'winner', seat: toMove === 0 ? 1 : 0, reason: 'empty-hand' };
+  }
   if (listLegalMoves(state, toMove).length === 0) {
     return { kind: 'winner', seat: toMove === 0 ? 1 : 0, reason: 'no-legal-move' };
   }

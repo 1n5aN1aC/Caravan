@@ -65,6 +65,23 @@ describe('hydrateForClient', () => {
     }
   });
 
+  it('keeps the opponent holding as many cards as they really hold', () => {
+    // Redacted is not empty. Any rule that counts a player's cards — running
+    // out of them ends the match — reads this hand, and hydrating it as `[]`
+    // told the client its opponent had nothing left after every single move.
+    const state = advance(createMatch('counts').state, 8);
+    for (const seat of [0, 1] as Seat[]) {
+      const them: Seat = seat === 0 ? 1 : 0;
+      const hydrated = hydrateForClient(redactFor(seat, state));
+      expect(hydrated.players[them].hand).toHaveLength(state.players[them].hand.length);
+      expect(hydrated.players[them].hand.length).toBeGreaterThan(0);
+      // Placeholders, though — the cards themselves stay secret.
+      expect(hydrated.players[them].hand.map((c) => c.id)).not.toContain(
+        state.players[them].hand[0]!.id,
+      );
+    }
+  });
+
   it('gives the idle seat no moves, matching the server', () => {
     const state = advance(createMatch('mirror-2').state, 8);
     const idle: Seat = state.turn === 0 ? 1 : 0;

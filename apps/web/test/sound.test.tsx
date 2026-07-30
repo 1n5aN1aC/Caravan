@@ -112,7 +112,7 @@ describe('useSoundCues', () => {
   it('sounds the opponent moving, from the other seat', () => {
     const before = scenario({
       turn: 1,
-      p0: { caravans: ['7H', '', ''], hand: '' },
+      p0: { caravans: ['7H', '', ''], hand: '5D' },
       p1: { caravans: ['4S', '', ''], hand: '6S' },
     });
     const card = before.players[1].hand[0]!;

@@ -41,7 +41,7 @@ export interface PlayerState {
 export type Phase = 'opening' | 'main' | 'over';
 
 export type MatchResult =
-  | { kind: 'winner'; seat: Seat; reason: 'tracks' | 'no-legal-move' }
+  | { kind: 'winner'; seat: Seat; reason: 'tracks' | 'no-legal-move' | 'empty-hand' }
   | { kind: 'draw'; reason: 'turn-cap' };
 
 export interface MatchState {
