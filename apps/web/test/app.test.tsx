@@ -124,11 +124,11 @@ describe('new table options', () => {
 
   it('offers no difficulty until the opponent is the computer', () => {
     const { container } = start();
-    expect(screen.queryByText('Normal')).toBeNull();
+    expect(screen.queryByText('Medium')).toBeNull();
     act(() => {
       screen.getByLabelText('Computer').click();
     });
-    expect(screen.getByText('Normal')).toBeTruthy();
+    expect(screen.getByText('Medium')).toBeTruthy();
     expect(container.querySelectorAll('.option-group')).toHaveLength(2);
   });
 

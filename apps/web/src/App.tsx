@@ -148,9 +148,13 @@ export function App() {
 }
 
 const DIFFICULTIES: Array<{ value: Difficulty; label: string; blurb: string }> = [
-  { value: 'easy', label: 'Easy', blurb: 'Plays more or less at random.' },
-  { value: 'normal', label: 'Normal', blurb: 'Builds its own caravans and leaves yours alone.' },
-  { value: 'hard', label: 'Hard', blurb: 'Builds its own, and wrecks yours with face cards.' },
+  { value: 'easy', label: 'Easy', blurb: 'Builds its own caravans and leaves yours alone.' },
+  { value: 'medium', label: 'Medium', blurb: 'Builds its own, and wrecks yours with face cards.' },
+  {
+    value: 'hard',
+    label: 'Hard',
+    blurb: "Plans a move ahead and guesses at your hand — it can't see your cards.",
+  },
 ];
 
 /**
@@ -166,7 +170,7 @@ function TableOptions({
   onBack: () => void;
 }) {
   const [solo, setSolo] = useState(false);
-  const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
 
   return (
     <section className="options">

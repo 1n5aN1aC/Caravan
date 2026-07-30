@@ -323,7 +323,7 @@ describe('single player', () => {
   /** A solo table: the host, and the AI already sitting in seat 1. */
   function solo(): { host: TestConnection; code: string } {
     const host = open();
-    hub.handle(host, { t: 'create', bot: 'normal' });
+    hub.handle(host, { t: 'create', bot: 'medium' });
     return { host, code: host.last('seated')!.code };
   }
 

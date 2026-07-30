@@ -194,20 +194,35 @@ like any other. It plays the full 54 and submits that deck at create time, which
 leaves the deal waiting only on the host. It answers after a fixed delay
 (`BOT_DELAY_MS`) so the table does not snap.
 
-`chooseMove` (`apps/server/src/bot.ts`) is one ply and no search: it scores the
-moves `listLegalMoves` already offers by applying each one and asking how much
-closer the board is to the 21–26 band, and takes the best. Randomness comes from
-the engine's seeded PRNG, so the same position always yields the same choice.
-The difficulties differ in what they are allowed to consider, not how deep they
-look:
+`chooseMove` (`apps/server/src/bot.ts`) never disbands a caravan that wasn't
+already unsellable, and never returns anything `listLegalMoves` didn't already
+call legal. Past that, the three difficulties are different tiers of effort,
+not the same algorithm with a knob turned:
 
-- **easy** — random, but never disbands a caravan that was doing fine
-- **normal** — plays its own side, including Jacks on its own overburdened
-  caravans and Kings on its own near-selling ones, and ignores the opponent
-- **hard** — the same scorer with the opponent's board subtracted, which is the
-  whole of its offense. Destroying a 24 with a Jack and Kinging a 13 into an
-  unsellable 27 both fall out of that one sign flip — and so does the restraint,
-  since Kinging their 12 into a tidy 24 scores as the gift it is.
+- **easy** — one ply, no search: scores each legal move by applying it and
+  asking how much closer its own board is to the 21–26 band, and takes the
+  best. Ignores the opponent entirely.
+- **medium** — the same one-ply scorer with the opponent's board subtracted,
+  which is the whole of its offense. Destroying a 24 with a Jack and Kinging a
+  13 into an unsellable 27 both fall out of that one sign flip — and so does
+  the restraint, since Kinging their 12 into a tidy 24 scores as the gift it is.
+- **hard** — a fixed evaluation function, searched two plies deep. Each
+  caravan is scored by the actual `caravanStatus` the engine would resolve it
+  to (`sold`/`tied`/`outbid`/`overburdened`/`building`), not just its value, so
+  it knows a 24 that only ties is worth less than a 24 that wins — something
+  `medium`'s plain sum can't see, since two moves that leave its own board at
+  the same total score identically to it. For each candidate move, `hard`
+  looks one reply ahead: the opponent's best response, evaluated the same way.
+  It does not know the opponent's actual hand or either deck's real draw
+  order — even though both are sitting right there in `MatchState` — so
+  that reply is judged against several sampled hands dealt from whatever
+  cards the opponent could still plausibly be holding, and the scores are
+  averaged. See `hiddenPool` and `determinize` in `bot.ts` for exactly what
+  "plausibly" means.
+
+Randomness — both the sampling and the tie-breaks — comes from the engine's
+seeded PRNG, so the same position always yields the same choice at every
+difficulty.
 
 Strategy lives in the server, not in `packages/rules`, which stays a statement
 of how the rules work and holds no opinions about how to win.

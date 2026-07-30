@@ -2,12 +2,17 @@ import type { Difficulty } from '@caravan/protocol';
 import {
   RULES,
   applyMove,
+  buildDeck,
+  caravanStatus,
   caravanValue,
   cardValue,
   createRng,
   isNumberCard,
   isOverburdened,
   listLegalMoves,
+  shuffle,
+  type Card,
+  type CaravanStatus,
   type MatchState,
   type Move,
   type Rng,
@@ -15,21 +20,28 @@ import {
 } from '@caravan/rules';
 
 /**
- * The AI opponent. One ply, no search: it enumerates the legal moves the engine
- * already offers, scores each by actually applying it, and takes the best. That
- * it chooses only from `listLegalMoves` is what makes it incapable of an illegal
- * move — the hub re-validates anyway, but it can never be the thing that fails.
+ * The AI opponent. Three difficulties, each a different tier of how much
+ * effort goes into a move, not a knob on the same algorithm:
  *
- * Deliberately not clever. The three difficulties differ in *what they are
- * allowed to consider*, not in how deep they look:
+ * - `easy`   one ply, no search: scores its own board and ignores the
+ *            opponent entirely.
+ * - `medium` the same one-ply scorer with the opponent's board counted
+ *            against it, which is what turns Jacks, Queens and Kings into
+ *            weapons.
+ * - `hard`   a fixed, lane-aware evaluation function (below), searched two
+ *            plies deep — its move, then the opponent's best reply — with
+ *            the opponent's hidden hand sampled rather than known. It never
+ *            reads the opponent's actual hand or either deck's actual future
+ *            draws, even though both are sitting right there in `MatchState`;
+ *            see `hiddenPool` for exactly what it's allowed to look at.
  *
- * - `easy`   random, but never disbands a caravan that was doing fine
- * - `normal` plays its own side well and ignores the opponent entirely
- * - `hard`   the same scorer with the opponent's board counted against it, which
- *            is what turns Jacks, Queens and Kings into weapons
+ * All three choose only from `listLegalMoves`, which is what makes them
+ * incapable of an illegal move — the hub re-validates anyway, but the bot can
+ * never be the thing that fails.
  */
 
-/** Score for one caravan's value, from the owner's point of view. */
+/** Score for one caravan's value, from the owner's point of view. Used by
+ *  `easy` and `medium`'s one-ply scorer. */
 function bandScore(value: number): number {
   if (value === 0) return 0;
   // In the sell range: the whole point of the game. Higher inside the band beats
@@ -41,21 +53,22 @@ function bandScore(value: number): number {
   return value;
 }
 
-/** How well a seat's three caravans are doing. */
+/** How well a seat's three caravans are doing, ignoring the opponent. */
 function boardScore(state: MatchState, seat: Seat): number {
   return state.players[seat].caravans.reduce((sum, c) => sum + bandScore(caravanValue(c)), 0);
 }
 
 /**
- * The position from the bot's point of view. `normal` weighs only its own board —
- * it is not trying to hurt anybody. `hard` subtracts the opponent's, and that one
- * sign flip is the whole of its offense: destroying a 24 with a Jack, or Kinging
- * an opponent's 13 into an unsellable 26+, both fall straight out of it. So does
- * the restraint — Kinging an opponent's 12 into a tidy 24 scores as the gift it is.
+ * The position from the bot's point of view, for `easy`/`medium` only.
+ * `easy` weighs only its own board — it is not trying to hurt anybody.
+ * `medium` subtracts the opponent's, and that one sign flip is the whole of
+ * its offense: destroying a 24 with a Jack, or Kinging an opponent's 13 into
+ * an unsellable 26+, both fall straight out of it. So does the restraint —
+ * Kinging an opponent's 12 into a tidy 24 scores as the gift it is.
  */
 function positionScore(state: MatchState, seat: Seat, difficulty: Difficulty): number {
   const mine = boardScore(state, seat);
-  if (difficulty !== 'hard') return mine;
+  if (difficulty !== 'medium') return mine;
   return mine - boardScore(state, seat === 0 ? 1 : 0);
 }
 
@@ -66,16 +79,16 @@ function worthDisbanding(state: MatchState, seat: Seat, caravan: number): boolea
 }
 
 /**
- * Disbanding throws away a whole caravan, which is almost never what a random
- * choice should land on — an easy opponent should be weak, not self-destructive.
- * So every difficulty drops disbands unless the caravan is already unsellable.
+ * Disbanding throws away a whole caravan, which is almost never what a
+ * reasonable choice should land on. So every difficulty drops disbands unless
+ * the caravan is already unsellable.
  */
 function candidates(state: MatchState, seat: Seat, difficulty: Difficulty): Move[] {
   return listLegalMoves(state, seat).filter((move) => {
     if (move.type === 'disband') return worthDisbanding(state, seat, move.caravan);
-    // `normal` keeps its hands off the other side of the table entirely, which is
+    // `easy` keeps its hands off the other side of the table entirely, which is
     // what stops it using face cards offensively.
-    if (move.type === 'play' && difficulty === 'normal') return move.target.seat === seat;
+    if (move.type === 'play' && difficulty === 'easy') return move.target.seat === seat;
     return true;
   });
 }
@@ -85,6 +98,17 @@ function playableIds(moves: Move[]): Set<string> {
   const ids = new Set<string>();
   for (const move of moves) if (move.type === 'play') ids.add(move.cardId);
   return ids;
+}
+
+/** The opening round places three number cards on three empty caravans, and
+ *  every one of them is legal. Start low: a caravan begun on a 10 has far
+ *  less room to climb into the band than one begun on an Ace. Shared by every
+ *  difficulty — there is no opponent reply worth searching for yet, and no
+ *  board state for a lane-aware evaluation to read. */
+function openingScore(state: MatchState, seat: Seat, move: Move): number {
+  if (move.type !== 'play') return -Infinity; // unreachable: opening allows only plays
+  const card = state.players[seat].hand.find((c) => c.id === move.cardId);
+  return card && isNumberCard(card) ? -cardValue(card) : -100;
 }
 
 function scoreMove(
@@ -102,13 +126,7 @@ function scoreMove(
     return playable.has(move.cardId) ? -2 : -1 - (card ? cardValue(card) / 100 : 0);
   }
 
-  // The opening round places three number cards on three empty caravans, and
-  // every one of them is legal. Start low: a caravan begun on a 10 has far less
-  // room to climb into the band than one begun on an Ace.
-  if (state.phase === 'opening' && move.type === 'play') {
-    const card = state.players[seat].hand.find((c) => c.id === move.cardId);
-    return card && isNumberCard(card) ? -cardValue(card) : -100;
-  }
+  if (state.phase === 'opening') return openingScore(state, seat, move);
 
   let after: MatchState;
   try {
@@ -130,6 +148,179 @@ function pick<T>(items: T[], rng: Rng): T | null {
   return items[rng.nextInt(items.length)]!;
 }
 
+/** Best-scored move(s) by `scoreMove`, tie broken by `rng`. Shared by `easy`
+ *  and `medium`, which differ only in what `scoreMove` does with `difficulty`. */
+function chooseByOnePly(
+  state: MatchState,
+  seat: Seat,
+  difficulty: Difficulty,
+  moves: Move[],
+  rng: Rng,
+): Move | null {
+  const playable = playableIds(moves);
+  let best = -Infinity;
+  let tied: Move[] = [];
+  for (const move of moves) {
+    const score = scoreMove(state, seat, move, difficulty, playable);
+    if (score > best) {
+      best = score;
+      tied = [move];
+    } else if (score === best) {
+      tied.push(move);
+    }
+  }
+  return pick(tied, rng);
+}
+
+// -- hard: fixed evaluation + two-ply search over a sampled opponent hand ---
+
+/**
+ * How one caravan's status (from `caravanStatus`, which already compares it
+ * against the caravan facing it) counts toward the fixed evaluation. This is
+ * what `easy`/`medium`'s plain `bandScore` misses: being in the 21-26 band
+ * only matters if it also beats the opposing lane, so the score is keyed off
+ * the actual resolution the engine would apply, not off value alone.
+ */
+function laneScore(status: CaravanStatus, value: number): number {
+  switch (status) {
+    case 'sold':
+      return 150 + value; // winning this lane outright
+    case 'tied':
+      return 100 + value; // in range, undecided, still live
+    case 'outbid':
+      return 40 + value / 2; // in range but currently behind
+    case 'overburdened':
+      return -50 - (value - RULES.SELL_MAX);
+    case 'building':
+      return value;
+  }
+}
+
+function laneTotal(state: MatchState, seat: Seat): number {
+  let total = 0;
+  for (let i = 0; i < state.players[seat].caravans.length; i++) {
+    const value = caravanValue(state.players[seat].caravans[i]!);
+    total += laneScore(caravanStatus(state, seat, i as 0 | 1 | 2), value);
+  }
+  return total;
+}
+
+/** The fixed evaluation function `hard` searches with: its own lanes minus
+ *  the opponent's, each lane scored by how it actually stands to resolve. */
+function evaluate(state: MatchState, seat: Seat): number {
+  const opponent: Seat = seat === 0 ? 1 : 0;
+  return laneTotal(state, seat) - laneTotal(state, opponent);
+}
+
+/**
+ * The cards of `owner`'s deck that are not already visible on the table or in
+ * their discard pile — the pool a fair opponent model may deal a plausible
+ * hand from. This is deliberately blind to which of those cards are actually
+ * in `owner`'s hand versus still in their deck, and to their deck's order:
+ * only the *count* of hidden cards (their hand size) and which specific cards
+ * could still be among them is used. It also assumes a full 54-card deck,
+ * which is what every seat the bot ever faces plays with in practice.
+ */
+function hiddenPool(state: MatchState, owner: Seat): Card[] {
+  const visible = new Set<string>();
+  for (const caravan of state.players[owner].caravans) {
+    for (const slot of caravan.slots) {
+      visible.add(slot.card.id);
+      for (const attached of slot.attached) visible.add(attached.id);
+    }
+  }
+  for (const card of state.players[owner].discard) visible.add(card.id);
+  return buildDeck(owner).filter((card) => !visible.has(card.id));
+}
+
+/**
+ * One plausible world: `owner`'s hidden hand replaced by a random deal from
+ * the cards that could still plausibly be theirs. Everything already public —
+ * both boards, both discards, the bot's own hand — is untouched. `owner`'s
+ * deck is filled with whatever's left of the sampled pool purely so `applyMove`
+ * has something to draw into; its order is fictional and is never read this
+ * deep, since the search stops one reply short of anyone drawing from it.
+ */
+function determinize(state: MatchState, owner: Seat, rng: Rng): MatchState {
+  const pool = shuffle([...hiddenPool(state, owner)], rng);
+  const handSize = state.players[owner].hand.length;
+  const world = structuredClone(state);
+  world.players[owner].hand = pool.slice(0, handSize);
+  world.players[owner].deck = pool.slice(handSize);
+  return world;
+}
+
+/** The opponent's best immediate reply in a sampled world, judged by the same
+ *  fixed evaluation from their point of view — the worst case a candidate
+ *  move has to survive. */
+function bestReply(state: MatchState, seat: Seat): Move | null {
+  let best: Move | null = null;
+  let bestScore = -Infinity;
+  for (const move of listLegalMoves(state, seat)) {
+    let after: MatchState;
+    try {
+      after = applyMove(state, seat, move).state;
+    } catch {
+      continue; // unreachable — every move came from listLegalMoves
+    }
+    const score = evaluate(after, seat);
+    if (score > bestScore) {
+      bestScore = score;
+      best = move;
+    }
+  }
+  return best;
+}
+
+const HARD_SAMPLES = 8;
+
+/**
+ * A candidate move's score: apply it, then average over several sampled
+ * worlds what the opponent's best reply does to the position. Averaging
+ * across determinizations (rather than committing to one guessed hand) is
+ * what keeps this from confidently playing a move that only works against
+ * one specific hand the opponent probably doesn't hold.
+ */
+function hardScore(state: MatchState, seat: Seat, move: Move, rng: Rng): number {
+  let after: MatchState;
+  try {
+    after = applyMove(state, seat, move).state;
+  } catch {
+    return -Infinity; // unreachable — every candidate came from listLegalMoves
+  }
+
+  const opponent: Seat = seat === 0 ? 1 : 0;
+  if (after.phase === 'over' || after.turn !== opponent) return evaluate(after, seat);
+
+  let total = 0;
+  for (let i = 0; i < HARD_SAMPLES; i++) {
+    const sampled = determinize(after, opponent, rng);
+    const reply = bestReply(sampled, opponent);
+    const final = reply ? applyMove(sampled, opponent, reply).state : sampled;
+    total += evaluate(final, seat);
+  }
+  return total / HARD_SAMPLES;
+}
+
+function chooseHardMove(state: MatchState, seat: Seat, moves: Move[], rng: Rng): Move | null {
+  // The opening round has no opponent reply worth searching for and no board
+  // for the lane-aware evaluation to read yet, so it reuses the quick heuristic.
+  if (state.phase === 'opening') return chooseByOnePly(state, seat, 'hard', moves, rng);
+
+  let best = -Infinity;
+  let tied: Move[] = [];
+  for (const move of moves) {
+    const score = hardScore(state, seat, move, rng);
+    if (score > best) {
+      best = score;
+      tied = [move];
+    } else if (score === best) {
+      tied.push(move);
+    }
+  }
+  return pick(tied, rng);
+}
+
 /**
  * The bot's move, or null when it has none — which the engine makes unreachable,
  * since `evaluateMatch` ends the match the moment the seat to move is out of
@@ -148,19 +339,6 @@ export function chooseMove(
     // case avoiding it is no longer an option.
     return pick(listLegalMoves(state, seat), rng);
   }
-  if (difficulty === 'easy') return pick(moves, rng);
-
-  const playable = playableIds(moves);
-  let best = -Infinity;
-  let tied: Move[] = [];
-  for (const move of moves) {
-    const score = scoreMove(state, seat, move, difficulty, playable);
-    if (score > best) {
-      best = score;
-      tied = [move];
-    } else if (score === best) {
-      tied.push(move);
-    }
-  }
-  return pick(tied, rng);
+  if (difficulty === 'hard') return chooseHardMove(state, seat, moves, rng);
+  return chooseByOnePly(state, seat, difficulty, moves, rng);
 }
