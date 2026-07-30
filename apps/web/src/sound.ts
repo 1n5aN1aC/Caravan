@@ -120,6 +120,17 @@ export function primeSounds(): void {
   for (const list of takes.values()) for (const url of list) preload(url);
 }
 
+/**
+ * Warms one cue ahead of the rest. The cue that most needs this is `startgame`:
+ * it fires on the very first snapshot, in the same breath as `primeSounds` —
+ * so without a head start it is the one cue guaranteed to be played cold. See
+ * `preload.ts`, which is what gives it that head start.
+ */
+export function primeCue(cue: Cue): void {
+  if (!sound.isEnabled()) return;
+  for (const url of takes.get(cue) ?? []) preload(url);
+}
+
 if (import.meta.env.DEV) {
   const summary = CUES.map((cue) => `${cue} ${takes.get(cue)!.length}`).join(', ');
   console.info(`[sound] ${summary}`);

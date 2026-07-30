@@ -8,6 +8,7 @@ import {
 import { Board } from './Board.js';
 import { DeckBuilder } from './DeckBuilder.js';
 import { CaravanClient } from './net.js';
+import { warmAssets } from './preload.js';
 import { sound } from './sound.js';
 import { ambience, music } from './music.js';
 
@@ -28,6 +29,12 @@ export function App() {
     client.connect();
     return () => client.dispose();
   }, [client]);
+
+  // Start fetching art and sound the moment the shell is up, rather than when
+  // the board that needs them appears — by then the deal has already been
+  // dealt. Deliberately not tied to being seated: a player sitting on the
+  // landing page typing a code is exactly the idle moment worth spending.
+  useEffect(() => warmAssets(), []);
 
   const seated = state.seat !== null;
   // The final board is the record of how the match went, so it stays up once

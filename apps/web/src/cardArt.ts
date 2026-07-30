@@ -136,6 +136,20 @@ export const cardBackUrl: string | null =
 
 export const hasCardArt = faces.size > 0 || jokers.size > 0;
 
+/**
+ * Every bundled image, split by how soon it is needed. Backs are drawn on
+ * nearly every screen — the deck builder, the opponent's hand, both draw piles —
+ * and there are only a handful, so they are worth fetching first. Faces are the
+ * bulk, and any one of them is only needed once that exact card turns up.
+ *
+ * Ordering is stable so a warm-up fetches the same thing in the same order on
+ * every load, which makes a half-warmed cache reproducible rather than a race.
+ */
+export const artUrls: { backs: readonly string[]; faces: readonly string[] } = {
+  backs: [...backs.values()].sort(),
+  faces: [...faces.values(), ...jokers.values()].sort(),
+};
+
 if (import.meta.env.DEV) {
   const wanted: string[] = [];
   for (const suit of ['S', 'H', 'D', 'C']) {

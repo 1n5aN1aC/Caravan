@@ -51,7 +51,7 @@ const ambienceTrack = toTracks(ambienceFiles)[0];
 
 /** Both sit under the card cues, which are the thing the player is meant to hear. */
 const AMBIENCE_VOLUME = 0.35;
-const MUSIC_VOLUME = 0.3;
+const MUSIC_VOLUME = 0.22;
 
 // ---------------------------------------------------------------------------
 // Ambience — one file, looping.
@@ -63,14 +63,36 @@ export const ambience = {
   available: (): boolean => ambienceTrack !== undefined,
 };
 
-function startAmbience(): void {
-  if (!ambienceTrack || !started) return;
+/**
+ * Builds the element without playing it. Split out so the file can be fetched
+ * before the gesture that is allowed to start it — the room tone is two
+ * megabytes and is wanted the instant the gate opens, which is far too late to
+ * begin asking for it.
+ */
+function ensureAmbience(): HTMLAudioElement | undefined {
+  if (!ambienceTrack) return undefined;
   if (!ambienceAudio) {
     ambienceAudio = new Audio(ambienceTrack.url);
     ambienceAudio.loop = true;
     ambienceAudio.volume = AMBIENCE_VOLUME;
+    ambienceAudio.preload = 'auto';
   }
-  play(ambienceAudio);
+  return ambienceAudio;
+}
+
+/**
+ * Fetches the room tone ahead of time, if it is wanted at all. Muted means
+ * muted: a player who turned it off does not pay to download it. See
+ * `preload.ts`.
+ */
+export function primeAmbience(): void {
+  if (ambience.isEnabled()) ensureAmbience();
+}
+
+function startAmbience(): void {
+  if (!started) return;
+  const audio = ensureAmbience();
+  if (audio) play(audio);
 }
 
 function stopAmbience(): void {
