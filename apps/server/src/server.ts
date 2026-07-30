@@ -1,6 +1,6 @@
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { createServer, type Server } from 'node:http';
-import { extname, join, normalize, resolve } from 'node:path';
+import { createReadStream, existsSync, statSync, type Stats } from 'node:fs';
+import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ClientMessage } from '@caravan/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
@@ -17,7 +17,100 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
   '.json': 'application/json',
+  // Audio. Without these the browser gets `application/octet-stream`, which
+  // Safari in particular will refuse to play. `.opus` in an Ogg container is
+  // `audio/ogg` — `audio/opus` is not a thing browsers agree on.
+  '.opus': 'audio/ogg',
+  '.ogg': 'audio/ogg',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.webm': 'audio/webm',
+  // Images.
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
 };
+
+/**
+ * Vite writes everything under `assets/` with a content hash in its filename,
+ * so a given URL there can never change meaning — it can be cached for a year
+ * and never revalidated. Everything else (chiefly `index.html`, the document
+ * that names those hashes) must be rechecked on every load, or a deploy would
+ * be invisible to anyone holding a stale copy.
+ *
+ * Decided from the resolved file rather than the URL, so that a request which
+ * fell back to index.html is never cached as if it were the asset it asked
+ * for — and so the separator is whatever this platform actually uses.
+ */
+function cacheControl(file: string): string {
+  const within = relative(WEB_ROOT, file);
+  return within.startsWith(`assets${sep}`)
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache';
+}
+
+/**
+ * A validator for the conditional requests browsers send once something has
+ * fallen out of their cache but is still on disk. Size and mtime are enough to
+ * distinguish any two builds; this is a static file server, not a CDN.
+ */
+function etagFor(stats: Stats): string {
+  return `"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`;
+}
+
+/** True when the client already holds this exact version. */
+function isFresh(req: IncomingMessage, etag: string, lastModified: string): boolean {
+  const ifNoneMatch = req.headers['if-none-match'];
+  // `If-None-Match` wins outright when present — it is the precise check, and a
+  // client sending both expects the date to be ignored.
+  if (ifNoneMatch) {
+    return ifNoneMatch.split(',').some((candidate) => candidate.trim() === etag);
+  }
+  const ifModifiedSince = req.headers['if-modified-since'];
+  if (!ifModifiedSince) return false;
+  const since = Date.parse(ifModifiedSince);
+  // `Last-Modified` has one-second resolution, so compare against the value we
+  // actually sent rather than the raw mtime, which carries milliseconds.
+  return Number.isFinite(since) && Date.parse(lastModified) <= since;
+}
+
+/**
+ * Parses a single-range `Range` header against a known file size. Multi-range
+ * requests are answered in full instead, which is allowed and which no media
+ * element asks for anyway.
+ *
+ * Returns `undefined` for "send the whole thing" and `null` for a range that
+ * cannot be satisfied, which is a 416 rather than a 200.
+ */
+function parseRange(
+  header: string | undefined,
+  size: number,
+): { start: number; end: number } | null | undefined {
+  if (!header) return undefined;
+  const match = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!match) return undefined;
+  const [, rawStart, rawEnd] = match;
+
+  let start: number;
+  let end: number;
+  if (rawStart === '') {
+    // A suffix range: `bytes=-500` means the last 500 bytes.
+    if (rawEnd === '') return undefined;
+    const length = Number(rawEnd);
+    if (length === 0) return null;
+    start = Math.max(0, size - length);
+    end = size - 1;
+  } else {
+    start = Number(rawStart);
+    end = rawEnd === '' ? size - 1 : Math.min(Number(rawEnd), size - 1);
+  }
+
+  if (start > end || start >= size) return null;
+  return { start, end };
+}
 
 export interface CaravanServer {
   http: Server;
@@ -50,7 +143,43 @@ export function createCaravanServer(): CaravanServer {
     if (!file.startsWith(WEB_ROOT) || !existsSync(file) || statSync(file).isDirectory()) {
       file = join(WEB_ROOT, 'index.html');
     }
-    res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' });
+
+    const stats = statSync(file);
+    const etag = etagFor(stats);
+    const lastModified = stats.mtime.toUTCString();
+    const headers: Record<string, string> = {
+      'content-type': MIME[extname(file)] ?? 'application/octet-stream',
+      'cache-control': cacheControl(file),
+      etag,
+      'last-modified': lastModified,
+      // Media elements will not seek — and Safari will not play at all —
+      // without knowing ranges are on offer.
+      'accept-ranges': 'bytes',
+    };
+
+    if (isFresh(req, etag, lastModified)) {
+      res.writeHead(304, headers);
+      res.end();
+      return;
+    }
+
+    const range = parseRange(req.headers.range, stats.size);
+    if (range === null) {
+      res.writeHead(416, { ...headers, 'content-range': `bytes */${stats.size}` });
+      res.end();
+      return;
+    }
+    if (range) {
+      res.writeHead(206, {
+        ...headers,
+        'content-range': `bytes ${range.start}-${range.end}/${stats.size}`,
+        'content-length': String(range.end - range.start + 1),
+      });
+      createReadStream(file, { start: range.start, end: range.end }).pipe(res);
+      return;
+    }
+
+    res.writeHead(200, { ...headers, 'content-length': String(stats.size) });
     createReadStream(file).pipe(res);
   });
 
