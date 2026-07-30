@@ -155,6 +155,20 @@ describe('face card targeting', () => {
     ).toMatch(/at most 3 face cards/);
   });
 
+  it('is not capped for a Jack, since it destroys the slot instead of attaching', () => {
+    const state = scenario({
+      p0: { caravans: ['9H+KS+KD+QC', '', ''], hand: 'JH' },
+    });
+    const card = state.players[0].hand[0]!;
+    expect(
+      checkMove(state, 0, {
+        type: 'play',
+        cardId: card.id,
+        target: { seat: 0, caravan: 0, slot: 0 },
+      }),
+    ).toBeNull();
+  });
+
   it('cannot be played on an empty caravan', () => {
     const state = scenario({ p0: { caravans: ['', '', ''], hand: 'KH' } });
     expect(

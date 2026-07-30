@@ -1,4 +1,4 @@
-import { redactFor, type RedactedState } from '@caravan/protocol';
+import { hydrateForClient, redactFor, type RedactedState } from '@caravan/protocol';
 import {
   applyMove,
   scenario,
@@ -369,5 +369,32 @@ describe('useSoundCues predict', () => {
     const after = applyMove(before, 0, move).state;
     rerender(<Probe view={redactFor(0, after)} />);
     expect(played).toEqual([]);
+  });
+
+  it('does not mistake the opponent’s redacted hand for exhaustion on an ordinary opening move', () => {
+    // Regression: an opponent's hand is always faked empty in a locally
+    // hydrated view (see hydrateForClient), and disbanding is not legal during
+    // the opening round — so, before the fix, `predict` judged nearly any
+    // first move as leaving the opponent with zero legal moves and played
+    // 'win' immediately. They hold real cards; only the client's own local
+    // approximation of their hand is what's empty.
+    const real = scenario({
+      phase: 'opening',
+      turn: 0,
+      p0: { caravans: ['', '', ''], hand: '2H', deckSize: 5 },
+      p1: { caravans: ['', '', ''], hand: '3H 4H 5H', deckSize: 5 },
+    });
+    // The exact pipeline Board.tsx uses: the server's redacted view, hydrated
+    // back into something the shared engine accepts.
+    const before = hydrateForClient(redactFor(0, real));
+    mount(redactFor(0, real));
+
+    const card = before.players[0].hand[0]!;
+    latestPredict!(before, 0, {
+      type: 'play',
+      cardId: card.id,
+      target: { seat: 0, caravan: 0 },
+    });
+    expect(played).toEqual(['addtotrack']);
   });
 });

@@ -48,12 +48,11 @@ export function canAttachFace(caravan: Caravan, slotIndex: number, card: Card): 
   if (!isFaceCard(card) && !isJoker(card)) return 'not a face card';
   const slot = caravan.slots[slotIndex];
   if (!slot) return 'no number card there';
+  // A Jack never lingers as an attachment — it destroys the whole slot (itself
+  // included) the instant it lands, so the cap on standing attachments doesn't apply.
+  if (card.rank === 'J') return null;
   if (slot.attached.length >= RULES.MAX_FACE_CARDS_PER_CARD) {
     return `at most ${RULES.MAX_FACE_CARDS_PER_CARD} face cards per card`;
-  }
-  if (isJoker(card)) {
-    // Joker targeting is unrestricted beyond the cap; its effect does the work.
-    return null;
   }
   return null;
 }

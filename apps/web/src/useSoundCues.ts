@@ -25,7 +25,15 @@ import { playCue, primeSounds } from './sound.js';
  * the snapshot diff (`startgame` has nothing to predict from; a result is only
  * known once the server resolves it), but a `predict`ed move that happens to
  * decide the match still plays its win/lose sting immediately, using the same
- * shared engine.
+ * shared engine — *if* the way it was decided is public information. A
+ * `tracks` or `turn-cap` ending is (caravan values and the ply count are never
+ * redacted); a `no-legal-move` ending is not, because it can only be computed
+ * by asking whether the *opponent* has a legal move, and their hand is always
+ * faked empty in a locally hydrated view (see `hydrateForClient` in
+ * `protocol/redact.ts`) — so exhaustion looks likely after almost any move
+ * during the opening round, when disbanding isn't even legal yet to save it.
+ * `predict` skips the sting for that reason and leaves it to the snapshot
+ * diff, which reads the server's own state and is never fooled by it.
  *
  * `removecard` is reserved for a card taken off the table against its owner's
  * will — a Jack or a Joker. Giving one up on purpose — discarding from hand, or
@@ -108,11 +116,28 @@ export function useSoundCues(view: RedactedState): (before: MatchState, seat: Se
 
     const gameOver = outcome.events.find((e) => e.type === 'gameOver');
     if (gameOver && gameOver.type === 'gameOver') {
-      // Marked here, ahead of the snapshot that will confirm it, so the effect
-      // above does not replay this sting a second time when that echo lands.
-      wasDecided.current = true;
-      if (gameOver.result.kind === 'winner') {
-        playCue(gameOver.result.seat === seat ? 'win' : 'lose');
+      // `before` is a locally hydrated view, and the opponent's hand in it is
+      // always empty — hands are redacted, and hydrateForClient fills the gap
+      // with `[]` (protocol/redact.ts), which that file notes is safe for our
+      // *own* legality only. `applyMove` here also runs `evaluateMatch`, which
+      // — after our move — asks whether the *opponent* has any legal move
+      // left. Judged against their faked-empty hand that can only ever go one
+      // way: during the opening round especially, where disbanding isn't even
+      // legal yet, this looks like exhaustion after nearly any first move,
+      // regardless of what is actually in their hand. `tracks` and `turn-cap`
+      // depend on nothing but public information (caravan values, ply count)
+      // and stay exact either way; only `no-legal-move` is skipped here and
+      // left for the snapshot diff below to confirm once the server's own
+      // state — which does know the opponent's hand — actually arrives.
+      const trustworthy = gameOver.result.reason !== 'no-legal-move';
+      if (trustworthy) {
+        // Marked here, ahead of the snapshot that will confirm it, so the
+        // effect above does not replay this sting a second time when that
+        // echo lands.
+        wasDecided.current = true;
+        if (gameOver.result.kind === 'winner') {
+          playCue(gameOver.result.seat === seat ? 'win' : 'lose');
+        }
       }
     }
 
