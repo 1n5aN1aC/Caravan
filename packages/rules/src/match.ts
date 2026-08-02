@@ -1,4 +1,5 @@
-import { buildDeck, checkDeckSelection, isNumberCard } from './cards.js';
+import { buildDeck, isNumberCard } from './cards.js';
+import { checkDeckPlayable, fullPool } from './decks.js';
 import { FEATURES, RULES } from './config.js';
 import { evaluateMatch } from './resolve.js';
 import { applyFaceEffect } from './effects.js';
@@ -26,15 +27,21 @@ function countNumberCards(cards: Card[]): number {
 
 /**
  * Per seat: the card ids that seat's built deck keeps, or null for the full 54.
- * Validated by `checkDeckSelection`; `createMatch` refuses an invalid one.
+ * Validated by `checkDeckPlayable`; `createMatch` refuses an invalid one.
  */
 export type DeckSelections = [readonly string[] | null, readonly string[] | null];
 
+/**
+ * A keep list is resolved against `fullPool` — every id any deck mode can
+ * produce — rather than the classic 54, so the ids alone say what the deck is
+ * and the mode never has to be recorded alongside them. `fullPool` opens with
+ * the classic deck in its original order, so a single-copy keep list still
+ * yields exactly the order it always did.
+ */
 function builtDeck(seat: Seat, keep: readonly string[] | null): Card[] {
-  const full = buildDeck(seat);
-  if (keep === null) return full;
+  if (keep === null) return buildDeck(seat);
   const wanted = new Set(keep);
-  return full.filter((card) => wanted.has(card.id));
+  return fullPool(seat).filter((card) => wanted.has(card.id));
 }
 
 /**
@@ -78,7 +85,7 @@ export function createMatch(seed: string, decks?: DeckSelections): MoveOutcome {
   for (const seat of [0, 1] as Seat[]) {
     const keep = decks?.[seat] ?? null;
     if (keep !== null) {
-      const reason = checkDeckSelection(seat, keep);
+      const reason = checkDeckPlayable(seat, keep);
       if (reason !== null) throw new Error(`seat ${seat} deck: ${reason}`);
     }
   }

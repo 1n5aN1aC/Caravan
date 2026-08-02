@@ -2,13 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   RULES,
   buildDeck,
+  buildPool,
   checkDeckSelection,
   createMatch,
+  fullPool,
+  isJoker,
   isNumberCard,
   type DeckSelections,
 } from '../src/index.js';
 
 const fullIds = (seat: 0 | 1) => buildDeck(seat).map((c) => c.id);
+const poolIds = (seat: 0 | 1, mode: 'classic' | 'build' | 'double') =>
+  buildPool(seat, mode).map((c) => c.id);
 
 describe('checkDeckSelection', () => {
   it('accepts the full 54', () => {
@@ -51,7 +56,71 @@ describe('checkDeckSelection', () => {
   // changes.
 });
 
+describe('deck modes', () => {
+  it('gives classic and build the same 54 the game always had', () => {
+    expect(poolIds(0, 'classic')).toEqual(fullIds(0));
+    expect(poolIds(0, 'build')).toEqual(fullIds(0));
+  });
+
+  it('gives double two of everything, Jokers included', () => {
+    const pool = buildPool(0, 'double');
+    expect(pool).toHaveLength(108);
+    expect(new Set(pool.map((c) => c.id)).size).toBe(108);
+    expect(pool.filter(isJoker)).toHaveLength(4);
+  });
+
+  it('opens the pool with the classic deck untouched, in its original order', () => {
+    // The ordering invariant every recorded replay rests on: a single-copy keep
+    // list filtered out of any pool comes back in exactly the order `buildDeck`
+    // produced, so a deal from before deck modes existed still reproduces.
+    expect(fullPool(0).slice(0, 54).map((c) => c.id)).toEqual(fullIds(0));
+    expect(buildPool(0, 'double').slice(0, 54).map((c) => c.id)).toEqual(fullIds(0));
+  });
+
+  it('tags only the later copies, so an existing id still means what it did', () => {
+    const pool = buildPool(0, 'double');
+    expect(pool.filter((c) => c.id === 'p0:AS')).toHaveLength(1);
+    expect(pool.filter((c) => c.id === 'p0:AS#2')).toHaveLength(1);
+    // The copy is the same card in every respect but identity.
+    const [first] = pool.filter((c) => c.id === 'p0:AS');
+    const [second] = pool.filter((c) => c.id === 'p0:AS#2');
+    expect({ ...second, id: first!.id }).toEqual(first);
+  });
+
+  it('refuses a second copy at a table that is not playing with one', () => {
+    const keep = [...poolIds(0, 'build'), 'p0:AS#2'];
+    expect(checkDeckSelection(0, keep, 'build')).toMatch(/no such card/);
+    expect(checkDeckSelection(0, keep, 'classic')).toMatch(/no such card/);
+    expect(checkDeckSelection(0, poolIds(0, 'double'), 'double')).toBeNull();
+  });
+
+  it('still rejects the same id twice under double — a copy is not a repeat', () => {
+    const keep = poolIds(0, 'double');
+    expect(checkDeckSelection(0, keep, 'double')).toBeNull();
+    keep[1] = keep[0]!;
+    expect(checkDeckSelection(0, keep, 'double')).toMatch(/kept twice/);
+  });
+
+  it('deals a doubled deck, with both copies of a card really in play', () => {
+    const keep = poolIds(0, 'double');
+    const { state } = createMatch('double-deal', [keep, null]);
+    const p0 = [...state.players[0].hand, ...state.players[0].deck];
+    expect(p0).toHaveLength(108);
+    expect(new Set(p0.map((c) => c.id)).size).toBe(108);
+    expect(p0.filter((c) => c.rank === 'A' && c.suit === 'S')).toHaveLength(2);
+  });
+});
+
 describe('createMatch with built decks', () => {
+  it('deals a single-copy deck exactly as it did before deck modes existed', () => {
+    // Nails the invariant end to end rather than at the pool: same seed, same
+    // classic keep list, identical deal — which is what keeps `{seed, decks,
+    // moves}` reproducing a match recorded before any of this landed.
+    const withIds = createMatch('legacy-replay', [fullIds(0), fullIds(1)]);
+    const withNulls = createMatch('legacy-replay', [null, null]);
+    expect(withIds.state).toEqual(withNulls.state);
+  });
+
   it('deals only from the kept cards, and only that many exist across the match', () => {
     const trimmedRanks = new Set(['K']);
     const decks: DeckSelections = [

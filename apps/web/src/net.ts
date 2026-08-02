@@ -1,5 +1,5 @@
 import { NET, type Difficulty, type RedactedState, type ServerMessage } from '@caravan/protocol';
-import type { GameEvent, Move } from '@caravan/rules';
+import { DEFAULT_DECK_MODE, type DeckModeId, type GameEvent, type Move } from '@caravan/rules';
 
 export type Connectivity = 'connecting' | 'open' | 'closed';
 
@@ -8,9 +8,17 @@ export interface ClientState {
   code: string | null;
   seat: 0 | 1 | null;
   status: 'idle' | 'waiting' | 'building' | 'playing' | 'ended';
+  /**
+   * Which cards this table plays with. Comes from the server rather than from
+   * whatever was picked on the create screen, because a seat that joined by
+   * code — or reconnected into one — never saw that screen.
+   */
+  mode: DeckModeId;
   present: [boolean, boolean];
   /** Per seat: has that seat's built deck been accepted by the server. */
   decksReady: [boolean, boolean];
+  /** Per seat: has that seat offered a rematch of the match on screen. */
+  rematch: [boolean, boolean];
   reconnectDeadline: number | null;
   match: RedactedState | null;
   /**
@@ -30,8 +38,10 @@ const initial: ClientState = {
   code: null,
   seat: null,
   status: 'idle',
+  mode: DEFAULT_DECK_MODE,
   present: [false, false],
   decksReady: [false, false],
+  rematch: [false, false],
   reconnectDeadline: null,
   match: null,
   events: [],
@@ -88,8 +98,8 @@ export class CaravanClient {
   }
 
   /** With a difficulty, seat 1 is filled by the AI; without, it waits for a human. */
-  createRoom(bot?: Difficulty): void {
-    this.send({ t: 'create', bot });
+  createRoom(bot?: Difficulty, mode?: DeckModeId): void {
+    this.send({ t: 'create', bot, mode });
   }
 
   joinRoom(code: string): void {
@@ -103,6 +113,11 @@ export class CaravanClient {
 
   play(move: Move): void {
     this.send({ t: 'move', move });
+  }
+
+  /** Offer to play the table again. Dealt once both seats have offered. */
+  rematch(): void {
+    this.send({ t: 'rematch' });
   }
 
   leave(): void {
@@ -126,9 +141,17 @@ export class CaravanClient {
         return this.patch({
           code: message.code,
           status: message.status,
+          mode: message.mode,
           present: message.present,
           decksReady: message.decksReady,
+          rematch: message.rematch,
           reconnectDeadline: message.reconnectDeadline,
+          // Back to building with a match still on screen means a rematch was
+          // agreed: the finished board is cleared out for the new deck build,
+          // rather than the old result hanging over the fresh table.
+          ...(message.status === 'building' && this.state.match
+            ? { match: null, events: [], error: null }
+            : {}),
         });
       case 'state':
         // The board renders from the snapshot alone, and *which* cards left is

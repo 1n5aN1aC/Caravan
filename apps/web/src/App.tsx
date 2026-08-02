@@ -6,6 +6,13 @@ import {
   type ReactElement,
 } from 'react';
 import type { Difficulty } from '@caravan/protocol';
+import {
+  buildPool,
+  DECK_MODES,
+  DECK_MODE_IDS,
+  DEFAULT_DECK_MODE,
+  type DeckModeId,
+} from '@caravan/rules';
 import { Board } from './Board.js';
 import { DeckBuilder } from './DeckBuilder.js';
 import { CaravanClient } from './net.js';
@@ -47,15 +54,27 @@ export function App() {
   // it. Note the room reports "ended" on any disconnect after a decided match,
   // not just on abandonment, so this is the common path and not an edge case.
   const showBoard = state.match !== null;
-  const frozen = state.status === 'ended';
+  // A decided match freezes the board on its own, without the room having to
+  // end: the table stays up for as long as a rematch is still on offer.
+  const frozen = state.status === 'ended' || !!state.match?.result;
 
   // A deck is submitted once and only once, so this reads it off the server's
   // own bookkeeping rather than local state — a refresh mid-build resumes into
   // the right screen instead of forgetting a deck was already sent.
   const mySubmitted = seated && state.decksReady[state.seat!];
+  const buildable = DECK_MODES[state.mode].buildable;
   // Offered as soon as a seat exists, not gated on an opponent — there is no
   // reason to make the host wait for company before trimming their own deck.
-  const showDeckBuilder = seated && !showBoard && !mySubmitted;
+  const showDeckBuilder = seated && !showBoard && !mySubmitted && buildable;
+
+  // A mode with no building to do sends its whole pool the moment the seat
+  // exists, so the player goes straight from the landing page to the table.
+  // Gated on the server's `decksReady` like the builder is, so a refresh
+  // mid-deal doesn't try to submit a deck that is already in.
+  useEffect(() => {
+    if (!seated || buildable || mySubmitted || showBoard) return;
+    client.submitDeck(buildPool(state.seat!, state.mode).map((card) => card.id));
+  }, [client, seated, buildable, mySubmitted, showBoard, state.seat, state.mode]);
 
   // Handed to the Board so it can sit above the hand. With no board to host it —
   // the landing page — it stands on its own instead.
@@ -100,9 +119,9 @@ export function App() {
 
       {!seated && creating && (
         <TableOptions
-          onStart={(bot) => {
+          onStart={(bot, mode) => {
             setCreating(false);
-            client.createRoom(bot);
+            client.createRoom(bot, mode);
           }}
           onBack={() => setCreating(false)}
         />
@@ -134,7 +153,11 @@ export function App() {
       )}
 
       {showDeckBuilder && (
-        <DeckBuilder seat={state.seat!} onConfirm={(keep) => client.submitDeck(keep)} />
+        <DeckBuilder
+          seat={state.seat!}
+          mode={state.mode}
+          onConfirm={(keep) => client.submitDeck(keep)}
+        />
       )}
 
       {seated && !showBoard && mySubmitted && (
@@ -143,7 +166,17 @@ export function App() {
         </section>
       )}
 
-      {state.match?.result && <Result result={state.match.result} you={state.match.seat} />}
+      {state.match?.result && (
+        <Result
+          result={state.match.result}
+          you={state.match.seat}
+          // Once the room has ended there is nothing left to play again with —
+          // the server has let the table go.
+          onRematch={state.status === 'ended' ? undefined : () => client.rematch()}
+          offered={state.rematch[state.match.seat]}
+          opponentOffered={state.rematch[state.match.seat === 0 ? 1 : 0]}
+        />
+      )}
     </main>
   );
 }
@@ -162,16 +195,21 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; blurb: string }> =
  * What kind of table to open. Single player fills the second seat with the AI
  * before the deal; multiplayer leaves it for whoever you give the code to. The
  * difficulty only exists for the former, so it is only shown for the former.
+ *
+ * The deck mode applies to both seats and cannot be changed once the table
+ * exists, because the deal depends on it — which is the same reason all of this
+ * is chosen before the room is created rather than in a lobby afterwards.
  */
 function TableOptions({
   onStart,
   onBack,
 }: {
-  onStart: (bot?: Difficulty) => void;
+  onStart: (bot?: Difficulty, mode?: DeckModeId) => void;
   onBack: () => void;
 }) {
   const [solo, setSolo] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+  const [mode, setMode] = useState<DeckModeId>(DEFAULT_DECK_MODE);
 
   return (
     <section className="options">
@@ -206,8 +244,22 @@ function TableOptions({
         </fieldset>
       )}
 
+      <fieldset className="option-group">
+        <legend>Cards</legend>
+        {DECK_MODE_IDS.map((id) => {
+          const { label, blurb } = DECK_MODES[id];
+          return (
+            <label key={id} title={blurb}>
+              <input type="radio" checked={mode === id} onChange={() => setMode(id)} />
+              {label}
+              <small className="dim">{blurb}</small>
+            </label>
+          );
+        })}
+      </fieldset>
+
       <div className="option-actions">
-        <button className="confirm" onClick={() => onStart(solo ? difficulty : undefined)}>
+        <button className="confirm" onClick={() => onStart(solo ? difficulty : undefined, mode)}>
           Start
         </button>
         <button className="ghost" onClick={onBack}>
@@ -221,9 +273,16 @@ function TableOptions({
 function Result({
   result,
   you,
+  onRematch,
+  offered,
+  opponentOffered,
 }: {
   result: NonNullable<ReturnType<CaravanClient['getSnapshot']>['match']>['result'];
   you: 0 | 1;
+  /** Absent when there is no longer a table to play again on. */
+  onRematch?: () => void;
+  offered: boolean;
+  opponentOffered: boolean;
 }) {
   if (!result) return null;
   const lost = result.kind === 'winner' && result.seat !== you;
@@ -241,6 +300,11 @@ function Result({
     <section className={`result ${lost ? 'lose' : ''}`}>
       {headline}
       <small className="dim">{why}</small>
+      {onRematch && (
+        <button className="confirm rematch" onClick={onRematch} disabled={offered}>
+          {offered ? 'Waiting for your opponent…' : opponentOffered ? 'Accept rematch' : 'Rematch'}
+        </button>
+      )}
     </section>
   );
 }

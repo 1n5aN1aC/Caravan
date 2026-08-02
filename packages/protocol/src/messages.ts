@@ -1,3 +1,4 @@
+import { DECK_MODE_IDS, type DeckModeId } from '@caravan/rules';
 import { z } from 'zod';
 
 /**
@@ -13,6 +14,13 @@ export const RoomCode = z.string().regex(/^[A-Z]{4}$/);
  */
 export const DifficultySchema = z.enum(['easy', 'medium', 'hard']);
 export type Difficulty = z.infer<typeof DifficultySchema>;
+
+/**
+ * Which cards the table plays with. Derived from the rules package's mode table
+ * rather than restated here, so adding a mode there is the whole change — the
+ * wire validation follows automatically.
+ */
+export const DeckModeSchema = z.enum(DECK_MODE_IDS);
 
 const Target = z.object({
   seat: z.union([z.literal(0), z.literal(1)]),
@@ -31,8 +39,16 @@ export const MoveSchema = z.discriminatedUnion('type', [
 
 /** Client -> server. */
 export const ClientMessage = z.discriminatedUnion('t', [
-  /** `bot` set means seat 1 is filled by the AI at that difficulty. */
-  z.object({ t: z.literal('create'), bot: DifficultySchema.optional() }),
+  /**
+   * `bot` set means seat 1 is filled by the AI at that difficulty. `mode`
+   * chooses the cards both seats build from; absent means the default, which
+   * keeps a client that predates deck modes working.
+   */
+  z.object({
+    t: z.literal('create'),
+    bot: DifficultySchema.optional(),
+    mode: DeckModeSchema.optional(),
+  }),
   z.object({ t: z.literal('join'), code: RoomCode }),
   /** Reconnect into a seat held by an HMAC-signed token from localStorage. */
   z.object({ t: z.literal('resume'), token: z.string() }),
@@ -41,8 +57,13 @@ export const ClientMessage = z.discriminatedUnion('t', [
    * checks; whether the selection is a legal deck is the rules engine's call
    * (`checkDeckSelection`), applied by the hub.
    */
-  z.object({ t: z.literal('deck'), keep: z.array(z.string().max(24)).min(1).max(54) }),
+  z.object({ t: z.literal('deck'), keep: z.array(z.string().max(24)).min(1).max(108) }),
   z.object({ t: z.literal('move'), move: MoveSchema }),
+  /**
+   * Offer to play the same table again. Takes effect once both seats have
+   * offered — the AI always accepts — and puts the room back to deck building.
+   */
+  z.object({ t: z.literal('rematch') }),
   z.object({ t: z.literal('leave') }),
   z.object({ t: z.literal('ping') }),
 ]);
@@ -70,10 +91,18 @@ export interface RoomMessage {
   t: 'room';
   code: string;
   status: RoomStatus;
+  /**
+   * The table's deck mode. Sent because a client that joined or reconnected
+   * has no other way to learn how the table was configured, and it decides
+   * whether the deck builder appears and what it lays out.
+   */
+  mode: DeckModeId;
   /** Per seat: is somebody connected right now. */
   present: [boolean, boolean];
   /** Per seat: has that seat submitted its built deck. Never the cards. */
   decksReady: [boolean, boolean];
+  /** Per seat: has that seat offered a rematch. Cleared when one is dealt. */
+  rematch: [boolean, boolean];
   /** Non-null while an opponent is inside the reconnect grace window. */
   reconnectDeadline: number | null;
 }

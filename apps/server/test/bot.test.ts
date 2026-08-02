@@ -1,4 +1,14 @@
-import { applyMove, listLegalMoves, scenario, type MatchState, type Move } from '@caravan/rules';
+import {
+  applyMove,
+  buildDeck,
+  buildPool,
+  cardValue,
+  isNumberCard,
+  listLegalMoves,
+  scenario,
+  type MatchState,
+  type Move,
+} from '@caravan/rules';
 import { describe, expect, it } from 'vitest';
 import { chooseMove } from '../src/bot.js';
 
@@ -13,10 +23,14 @@ function atPly(state: MatchState, ply: number): MatchState {
 function overManyTurns(
   state: MatchState,
   difficulty: (typeof DIFFICULTIES)[number],
+  opponentDeck?: readonly string[],
 ): Move[] {
   // Ply must stay even so it remains seat 1's turn as far as the engine cares;
   // only the RNG skip actually changes.
-  return Array.from({ length: 40 }, (_, i) => chooseMove(atPly(state, 10 + i * 2), 1, difficulty)!);
+  return Array.from(
+    { length: 40 },
+    (_, i) => chooseMove(atPly(state, 10 + i * 2), 1, difficulty, opponentDeck)!,
+  );
 }
 
 describe('the bot', () => {
@@ -209,6 +223,43 @@ describe('the bot', () => {
       const stateA = scenario({ ...base, p0: { ...base.p0, hand: '2D 3D' } });
       const stateB = scenario({ ...base, p0: { ...base.p0, hand: 'KH AC' } });
       expect(chooseMove(stateA, 1, 'hard')).toEqual(chooseMove(stateB, 1, 'hard'));
+    });
+
+    it('does model the opponent from the deck they actually built', () => {
+      // Deck composition is private at the table — the protocol tells a seat
+      // only `decksReady` — so this is knowledge the bot has and a human
+      // opponent does not. Deliberate: see `chooseMove`. What it must not be
+      // is *ignored*, which is what the old full-54 assumption amounted to, so
+      // two very different opponent decks have to reach the bot as different.
+      const state = scenario({
+        turn: 1,
+        p0: { caravans: ['7S,9H', '5H', ''], hand: '2D 3D' },
+        p1: { caravans: ['6S,8S', '6H,8H', ''], hand: '10C 5D JS', deckSize: 10 },
+      });
+      const allFaces = buildDeck(0)
+        .filter((c) => !isNumberCard(c) || cardValue(c) > 8)
+        .map((c) => c.id);
+      const allNumbers = buildDeck(0).filter(isNumberCard).map((c) => c.id);
+
+      // Same position, same seed, same hand size to sample — only the pool the
+      // opponent's hidden cards are drawn from differs.
+      const over = (deck: string[]) =>
+        Array.from({ length: 6 }, (_, i) => chooseMove(atPly(state, 10 + i * 2), 1, 'hard', deck));
+      expect(over(allFaces)).not.toEqual(over(allNumbers));
+    });
+
+    it('plays a doubled deck without tripping over the second copy of a card', () => {
+      const state = scenario({
+        turn: 1,
+        p0: { caravans: ['7S,9H,10D', '5H', ''] },
+        p1: { caravans: ['6S,8S', '6H,8H', ''], hand: '10C 5D', deckSize: 10 },
+      });
+      const doubled = buildPool(0, 'double').map((c) => c.id);
+      const legal = new Set(listLegalMoves(state, 1).map((m) => JSON.stringify(m)));
+      for (let i = 0; i < 6; i++) {
+        const move = chooseMove(atPly(state, 10 + i * 2), 1, 'hard', doubled)!;
+        expect(legal.has(JSON.stringify(move))).toBe(true);
+      }
     });
 
     it('does not sell its own last caravan when that hands the opponent the other two and the match', () => {

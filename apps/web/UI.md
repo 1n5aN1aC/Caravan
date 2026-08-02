@@ -12,8 +12,8 @@ many cards are actually on the table, which CSS cannot compute — those live in
 
 | File | Owns |
 |---|---|
-| `src/App.tsx` | Landing page, the session panel, the result overlay, connection state |
-| `src/DeckBuilder.tsx` | Trimming the full 54 down before the deal |
+| `src/App.tsx` | Landing page, new-table options, the session panel, the result overlay, connection state |
+| `src/DeckBuilder.tsx` | Trimming the table's card pool down before the deal |
 | `src/Board.tsx` | The table: columns, caravans, centre line, the hand |
 | `src/PlayingCard.tsx` | One card face — supplied art, or a face drawn in CSS |
 | `src/cardArt.ts` | Matching image files to cards at build time |
@@ -211,16 +211,55 @@ That is why highlight rings on art cards are `drop-shadow` filters rather than
 
 See `src/assets/cards/README.md` for naming and the import scripts.
 
+## Deck modes
+
+A table is created with one of the modes in `DECK_MODES` (`packages/rules/src/decks.ts`),
+chosen on the options screen and applied to both seats:
+
+| Mode | Pool | Builder? |
+| --- | --- | --- |
+| `classic` | the standard 54 | no |
+| `build` (default) | the standard 54 | yes |
+| `double` | 108 — two of every card, four Jokers | yes |
+
+The mode is a declarative row, not a branch: `copies`, `include`, `buildable`
+and `minSize`. A new mode ("no face cards", "numbers only") is one entry and no
+change here, in `App.tsx`, or on the server.
+
+The second copy of a card carries a `#2` tag on its id (`p0:AS#2`); copy one
+keeps the bare id it always had. That is what lets duplicates exist at all —
+every id stays globally unique, so React keys, `targetsByCard`, the
+`useDepartures` diff and the `useSoundCues` diff all keep working with no notion
+of multiplicity. `cardFromId` already stripped a `#n` tag, so nothing in the
+notation layer needed teaching.
+
+Two consequences worth knowing:
+
+- **`fullPool` opens with the classic deck in its original order.** A
+  single-copy keep list therefore deals exactly what it dealt before modes
+  existed, which is what keeps recorded replays reproducing. Do not reorder it.
+- **A replay records no mode.** Ids say what the deck is, so `{seat, decks,
+  moves}` is still the whole record. `checkDeckSelection` is the mode-aware
+  check the hub applies; `checkDeckPlayable` is the mode-agnostic one
+  `createMatch` uses, because a replay has no table attached.
+
+The mode reaches the client only on the `room` frame, never from whatever was
+picked on the options screen — a seat that joined by code, or reconnected, never
+saw that screen.
+
 ## Deck building
 
-`DeckBuilder.tsx` lays out `buildDeck(seat)` — the same 54 the engine deals
-from — as a grid of ordinary `.card`s wrapped in buttons. Clicking one toggles
-it out; there is no separate "selected" state to reconcile, because "kept" is
-just "not in the removed set". The floor (`RULES.MIN_DECK_SIZE`) is enforced by
-refusing the click that would cross it rather than disabling cards in
-advance — with 54 buttons on screen, precomputing which ones are still legal to
-remove would mean recomputing 54 button states on every click for a fact
-(`kept > floor`) that is one number.
+`DeckBuilder.tsx` lays out `buildPool(seat, mode)` — the same cards the engine
+deals from — as a grid of ordinary `.card`s wrapped in buttons. Clicking one
+toggles it out; there is no separate "selected" state to reconcile, because
+"kept" is just "not in the removed set". The floor (the mode's `minSize`) is
+enforced by refusing the click that would cross it rather than disabling cards
+in advance — with 54 (or 108) buttons on screen, precomputing which ones are
+still legal to remove would mean recomputing every button state on every click
+for a fact (`kept > floor`) that is one number.
+
+The grid sorts rank-first, and copies of a card land adjacent, so "keep one 7♥,
+not two" is a legible choice rather than a hunt.
 
 `App.tsx` decides whether to show it: as soon as a seat exists and the match
 hasn't been dealt, gated on `!decksReady[seat]` rather than local component
@@ -230,10 +269,38 @@ bookkeeping is the source of truth for "have I already sent mine", the same way
 moment a seat is granted, not once an opponent joins; there is no reason to make
 the host wait to start trimming.
 
+A mode that isn't `buildable` never shows the screen: `App.tsx` submits the
+whole pool itself, gated on that same `decksReady`, so the player goes straight
+to the table and a refresh doesn't resend a deck the server already has.
+
+Removals are remembered in `localStorage` by card key with the owner prefix
+stripped but the `#n` tag kept, so the two copies are remembered separately, and
+a key belonging to another mode's pool is simply filtered out on load.
+
 Validity is the rules engine's call (`checkDeckSelection`), applied identically
 on both ends — the client's floor enforcement is advisory UI, exactly like
 legality highlighting, and the server re-checks a submitted deck independently
 before ever dealing from it.
+
+## Rematch
+
+The offer sits on the result overlay, which is otherwise inert (`pointer-events:
+none`, so the final board still reads through it) — the button takes the pointer
+back for itself and nothing else does.
+
+It is an offer, not a command: the server holds `rematch[seat]` per side and only
+redeals once both are set, so the button's own label is the whole state machine
+("Rematch" → "Waiting for your opponent…", or "Accept rematch" when theirs
+landed first). A solo table redeals on the host's click alone; the AI is always
+willing.
+
+A rematch keeps the room — same code, same seats, same tokens — and throws away
+only the match: fresh seed, no moves, both decks cleared, so it lands back in the
+deck builder rather than skipping it. The client notices by the `room` frame
+alone: status back to `building` with a match still on screen means the finished
+board is cleared. Note that a room whose match is decided is **not** reported as
+`ended` — rooms report `ended` only when the server has actually let them go, and
+`frozen` for a decided match comes from `match.result` instead.
 
 ## Sound
 

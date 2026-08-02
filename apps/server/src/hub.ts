@@ -8,11 +8,13 @@ import {
   type ServerMessage,
 } from '@caravan/protocol';
 import {
+  DEFAULT_DECK_MODE,
   IllegalMoveError,
   applyMove,
-  buildDeck,
+  buildPool,
   checkDeckSelection,
   createMatch,
+  type DeckModeId,
   type GameEvent,
   type Move,
   type Seat,
@@ -84,7 +86,7 @@ export class Hub {
       case 'ping':
         return connection.send({ t: 'pong' });
       case 'create':
-        return this.create(connection, message.bot);
+        return this.create(connection, message.bot, message.mode);
       case 'join':
         return this.join(connection, message.code);
       case 'resume':
@@ -93,6 +95,8 @@ export class Hub {
         return this.deck(connection, message.keep);
       case 'move':
         return this.move(connection, message.move);
+      case 'rematch':
+        return this.rematch(connection);
       case 'leave':
         return this.disconnect(connection);
     }
@@ -137,16 +141,18 @@ export class Hub {
 
   // -- room lifecycle -------------------------------------------------------
 
-  private create(connection: Connection, bot?: Difficulty): void {
+  private create(connection: Connection, bot?: Difficulty, mode?: DeckModeId): void {
     const code = generateCode((c) => this.store.get(c) !== undefined);
     const room: Room = {
       code,
       seed: generateSeed(),
       bot: bot ?? null,
+      mode: mode ?? DEFAULT_DECK_MODE,
       state: null,
       decks: [null, null],
       moves: [],
       claimed: [true, false],
+      rematch: [false, false],
       disconnectedAt: [null, null],
       lastActivity: this.now(),
       ended: false,
@@ -155,12 +161,13 @@ export class Hub {
     this.seats.set(code, [connection, null]);
     this.seat(connection, room, 0);
 
-    // Single player: the AI takes seat 1 immediately and plays the full 54, so
-    // the only thing the deal is still waiting on is the host's own deck.
+    // Single player: the AI takes seat 1 immediately and plays the mode's whole
+    // pool — the same deck a human who removed nothing would bring — so the only
+    // thing the deal is still waiting on is the host's own deck.
     if (bot) {
       const botConnection = new BotConnection();
       room.claimed[1] = true;
-      room.decks[1] = buildDeck(1).map((card) => card.id);
+      room.decks[1] = buildPool(1, room.mode).map((card) => card.id);
       this.seats.get(code)![1] = botConnection;
       this.sessions.set(botConnection, { connection: botConnection, code, seat: 1 });
     }
@@ -199,7 +206,7 @@ export class Hub {
     if (room.state) return this.fail(connection, 'the match has already been dealt');
     if (room.decks[session.seat]) return this.fail(connection, 'your deck is already in');
 
-    const reason = checkDeckSelection(session.seat, keep);
+    const reason = checkDeckSelection(session.seat, keep, room.mode);
     if (reason !== null) return this.fail(connection, reason);
 
     room.decks[session.seat] = [...keep];
@@ -217,6 +224,35 @@ export class Hub {
     } else {
       this.broadcastRoom(room);
     }
+  }
+
+  /**
+   * An offer to play the same table again, which only takes once both seats have
+   * made it — the AI is always willing, so a solo table restarts on the host's
+   * click alone. The room is kept (code, seats and tokens all survive); only the
+   * match is thrown away, so a rematch is a redeal rather than a new room.
+   */
+  private rematch(connection: Connection): void {
+    const session = this.sessions.get(connection);
+    if (!session) return this.fail(connection, 'you are not seated');
+    const room = this.store.get(session.code);
+    if (!room) return this.fail(connection, 'that room is gone');
+    if (room.state?.phase !== 'over') return this.fail(connection, 'that match is still going');
+
+    room.rematch[session.seat] = true;
+    if (room.bot) room.rematch[1] = true;
+    room.lastActivity = this.now();
+    if (!room.rematch[0] || !room.rematch[1]) return this.broadcastRoom(room);
+
+    // A fresh seed, so the rematch is a different deal and not the same one
+    // replayed. Decks are rebuilt too: the builder is part of the match.
+    room.seed = generateSeed();
+    room.state = null;
+    room.moves = [];
+    room.decks = [null, room.bot ? buildPool(1, room.mode).map((card) => card.id) : null];
+    room.rematch = [false, false];
+    room.ended = false;
+    this.maybeStart(room);
   }
 
   private resume(connection: Connection, token: string): void {
@@ -303,15 +339,15 @@ export class Hub {
     const message: ServerMessage = {
       t: 'room',
       code: room.code,
-      status: room.ended
-        ? 'ended'
-        : room.state
-          ? 'playing'
-          : room.claimed[1]
-            ? 'building'
-            : 'waiting',
+      mode: room.mode,
+      // A room whose match is decided is `ended` but still very much alive — it
+      // can be rematched. Rooms that are truly finished are deleted by
+      // `endRoom`, which says so with an `ended` message of its own, so nothing
+      // this broadcast reaches is ever past playing.
+      status: room.state ? 'playing' : room.claimed[1] ? 'building' : 'waiting',
       present: [occupants[0] !== null, occupants[1] !== null],
       decksReady: [room.decks[0] !== null, room.decks[1] !== null],
+      rematch: [...room.rematch],
       reconnectDeadline: graceStart === null ? null : graceStart + NET.RECONNECT_GRACE_MS,
     };
     for (const connection of occupants) connection?.send(message);
@@ -348,7 +384,7 @@ export class Hub {
       const current = this.store.get(room.code);
       if (!current?.state || current.ended) return;
       if (current.state.turn !== 1 || current.state.phase === 'over') return;
-      const move = chooseMove(current.state, 1, room.bot!);
+      const move = chooseMove(current.state, 1, room.bot!, current.decks[0] ?? undefined);
       if (move) this.move(connection, move);
     }, BOT_DELAY_MS);
 

@@ -1,4 +1,3 @@
-import { RULES } from './config.js';
 import type { Card, FaceRank, NumberRank, Rank, Seat, Suit } from './types.js';
 
 export const SUITS: readonly Suit[] = ['S', 'H', 'D', 'C'];
@@ -59,28 +58,5 @@ export function buildDeck(owner: Seat): Card[] {
   return cards;
 }
 
-/**
- * Deck building: the ids a player chose to keep of their full 54. Valid when
- * every id names a real card of theirs, nothing is kept twice, the deck holds
- * at least `MIN_DECK_SIZE` cards, and enough of them are number cards that a
- * legal opening hand exists and the opening round can actually be completed.
- * null = valid, string = the reason it is not — the same contract as legality.
- */
-export function checkDeckSelection(owner: Seat, keep: readonly string[]): string | null {
-  if (keep.length < RULES.MIN_DECK_SIZE) {
-    return `a deck must keep at least ${RULES.MIN_DECK_SIZE} cards`;
-  }
-  const full = new Map(buildDeck(owner).map((c) => [c.id, c]));
-  const seen = new Set<string>();
-  let numbers = 0;
-  for (const id of keep) {
-    const card = full.get(id);
-    if (!card) return `no such card: ${id}`;
-    if (seen.has(id)) return `card kept twice: ${id}`;
-    seen.add(id);
-    if (isNumberCard(card)) numbers++;
-  }
-  const floor = Math.max(RULES.MIN_NUMBER_CARDS_IN_HAND, RULES.OPENING_PLACEMENTS);
-  if (numbers < floor) return `a deck must keep at least ${floor} number cards`;
-  return null;
-}
+// Deck building — `checkDeckSelection` and the pools it validates against — is
+// in decks.ts, which builds on this file.

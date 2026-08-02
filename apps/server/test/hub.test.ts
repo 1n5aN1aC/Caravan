@@ -1,5 +1,5 @@
 import { ClientMessage, NET, type RedactedState, type ServerMessage } from '@caravan/protocol';
-import { buildDeck, listLegalMoves } from '@caravan/rules';
+import { buildDeck, buildPool, listLegalMoves } from '@caravan/rules';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Hub, type Connection } from '../src/hub.js';
 import { InMemoryMatchStore, SeatTokens } from '../src/store.js';
@@ -169,6 +169,56 @@ describe('deck building', () => {
   });
 });
 
+describe('deck modes', () => {
+  it('defaults to deck building when a create frame names no mode', () => {
+    const host = open();
+    hub.handle(host, { t: 'create' });
+    expect(host.last('room')!.mode).toBe('build');
+  });
+
+  it('tells every seat the mode, so a joiner learns it without being told', () => {
+    const host = open();
+    hub.handle(host, { t: 'create', mode: 'double' });
+    const guest = open();
+    hub.handle(guest, { t: 'join', code: host.last('seated')!.code });
+    expect(guest.last('room')!.mode).toBe('double');
+  });
+
+  it('accepts a doubled deck at a double table', () => {
+    const host = open();
+    hub.handle(host, { t: 'create', mode: 'double' });
+    const keep = buildPool(0, 'double').map((c) => c.id);
+    expect(keep).toHaveLength(108);
+    hub.handle(host, { t: 'deck', keep });
+    expect(host.last('error')).toBeUndefined();
+    expect(host.last('room')!.decksReady).toEqual([true, false]);
+  });
+
+  it('refuses a doubled deck at a table that is not playing with one', () => {
+    const host = open();
+    hub.handle(host, { t: 'create', mode: 'build' });
+    hub.handle(host, { t: 'deck', keep: buildPool(0, 'double').map((c) => c.id) });
+    expect(host.last('error')!.message).toMatch(/no such card/);
+  });
+
+  it('deals the AI the mode’s whole pool, both at the table and on a rematch', () => {
+    const host = open();
+    hub.handle(host, { t: 'create', bot: 'easy', mode: 'double' });
+    const code = host.last('seated')!.code;
+    expect(store.get(code)!.decks[1]).toHaveLength(108);
+
+    hub.handle(host, { t: 'deck', keep: buildPool(0, 'double').map((c) => c.id) });
+    while (store.get(code)!.state!.phase !== 'over') {
+      const state = store.get(code)!.state!;
+      if (state.turn === 0) {
+        hub.handle(host, { t: 'move', move: listLegalMoves(state, 0)[0]! });
+      } else if (!flushBot()) break;
+    }
+    hub.handle(host, { t: 'rematch' });
+    expect(store.get(code)!.decks[1]).toHaveLength(108);
+  });
+});
+
 describe('redaction', () => {
   it('never puts the opponent’s hand or deck order on the wire', () => {
     const { host, guest } = pair();
@@ -316,6 +366,82 @@ describe('protocol validation', () => {
       ClientMessage.safeParse({ t: 'move', move: { type: 'play', cardId: 'x' } }).success,
     ).toBe(false);
     expect(ClientMessage.safeParse({ t: 'join', code: 'ABCD' }).success).toBe(true);
+  });
+});
+
+describe('rematch', () => {
+  /** Plays a seated pair's match out to a result, first legal move each turn.
+      The ply cap guarantees this terminates however badly both sides play. */
+  function playOut(host: TestConnection, guest: TestConnection, code: string): void {
+    for (let turn = 0; turn < 400; turn++) {
+      const room = store.get(code);
+      if (!room?.state || room.state.phase === 'over') break;
+      const [move] = listLegalMoves(room.state, room.state.turn);
+      if (!move) break;
+      hub.handle(room.state.turn === 0 ? host : guest, { t: 'move', move });
+    }
+    expect(store.get(code)!.state!.phase).toBe('over');
+  }
+
+  it('waits for both seats before redealing', () => {
+    const { host, guest, code } = pair();
+    playOut(host, guest, code);
+
+    hub.handle(host, { t: 'rematch' });
+    expect(host.last('room')!.rematch).toEqual([true, false]);
+    // The table is still up — a decided match is not a gone room.
+    expect(host.last('room')!.status).toBe('playing');
+    expect(store.get(code)!.state!.phase).toBe('over');
+
+    hub.handle(guest, { t: 'rematch' });
+    const room = guest.last('room')!;
+    expect(room.status).toBe('building');
+    expect(room.code).toBe(code);
+    expect(room.decksReady).toEqual([false, false]);
+    expect(room.rematch).toEqual([false, false]);
+    expect(store.get(code)!.state).toBeNull();
+  });
+
+  it('deals a different match, keeping the same table and seats', () => {
+    const { host, guest, code } = pair();
+    const first = store.get(code)!.seed;
+    playOut(host, guest, code);
+    hub.handle(host, { t: 'rematch' });
+    hub.handle(guest, { t: 'rematch' });
+
+    expect(store.get(code)!.seed).not.toBe(first);
+    expect(store.get(code)!.moves).toEqual([]);
+    submitFullDecks(host, guest);
+    expect(host.last('room')!.status).toBe('playing');
+    expect((host.last('state')!.state as RedactedState).result).toBeNull();
+  });
+
+  it('restarts a solo table on the host’s word alone — the AI always plays again', () => {
+    const host = open();
+    hub.handle(host, { t: 'create', bot: 'medium' });
+    const code = host.last('seated')!.code;
+    hub.handle(host, { t: 'deck', keep: buildDeck(0).map((c) => c.id) });
+    for (let turn = 0; turn < 400; turn++) {
+      const room = store.get(code);
+      if (!room?.state || room.state.phase === 'over') break;
+      if (room.state.turn === 0) {
+        hub.handle(host, { t: 'move', move: listLegalMoves(room.state, 0)[0]! });
+      } else {
+        flushBot();
+      }
+    }
+
+    hub.handle(host, { t: 'rematch' });
+    const room = host.last('room')!;
+    expect(room.status).toBe('building');
+    // The AI's 54 is back in place, so the host's own deck is all that is owed.
+    expect(room.decksReady).toEqual([false, true]);
+  });
+
+  it('refuses a rematch of a match that is still going', () => {
+    const { host } = pair();
+    hub.handle(host, { t: 'rematch' });
+    expect(host.last('error')!.message).toMatch(/still going/);
   });
 });
 

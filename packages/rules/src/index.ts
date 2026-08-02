@@ -1,6 +1,7 @@
 export * from './types.js';
 export * from './config.js';
 export * from './cards.js';
+export * from './decks.js';
 export * from './rng.js';
 export * from './derive.js';
 export * from './effects.js';

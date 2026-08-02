@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { buildDeck, cardFromId, parseCards } from '../src/index.js';
+import { buildDeck, cardFromId, fullPool, parseCards } from '../src/index.js';
 
 describe('cardFromId', () => {
   it('rebuilds every card of a real deck from its id alone', () => {
     for (const seat of [0, 1] as const) {
       for (const card of buildDeck(seat)) {
+        expect(cardFromId(card.id)).toEqual(card);
+      }
+    }
+  });
+
+  it('rebuilds the tagged copies a multi-copy pool adds, too', () => {
+    for (const seat of [0, 1] as const) {
+      for (const card of fullPool(seat)) {
         expect(cardFromId(card.id)).toEqual(card);
       }
     }

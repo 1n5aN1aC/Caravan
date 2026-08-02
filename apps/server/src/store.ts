@@ -1,12 +1,14 @@
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import { NET, type Difficulty } from '@caravan/protocol';
-import type { MatchState, Move, Seat } from '@caravan/rules';
+import type { DeckModeId, MatchState, Move, Seat } from '@caravan/rules';
 
 export interface Room {
   code: string;
   seed: string;
   /** The AI's difficulty when seat 1 is a bot, null for a two-human table. */
   bot: Difficulty | null;
+  /** Which cards both seats build from. Fixed when the table is created. */
+  mode: DeckModeId;
   state: MatchState | null;
   /** Per seat: the built deck's kept card ids, or null while still building.
       Part of the replay record — the deal depends on it as much as the seed. */
@@ -15,6 +17,8 @@ export interface Room {
   moves: Array<{ seat: Seat; move: Move }>;
   /** Which seats have been claimed, and when each last went quiet. */
   claimed: [boolean, boolean];
+  /** Per seat: has that seat offered a rematch of the match just finished. */
+  rematch: [boolean, boolean];
   disconnectedAt: [number | null, number | null];
   lastActivity: number;
   ended: boolean;

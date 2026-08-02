@@ -3,6 +3,7 @@ import {
   RULES,
   applyMove,
   buildDeck,
+  fullPool,
   caravanStatus,
   caravanValue,
   cardValue,
@@ -33,7 +34,8 @@ import {
  *            the opponent's hidden hand sampled rather than known. It never
  *            reads the opponent's actual hand or either deck's actual future
  *            draws, even though both are sitting right there in `MatchState`;
- *            see `hiddenPool` for exactly what it's allowed to look at.
+ *            it *is* told which cards the opponent's built deck holds, which
+ *            is more than a human across the table knows. See `chooseMove`.
  *
  * All three choose only from `listLegalMoves`, which is what makes them
  * incapable of an illegal move — the hub re-validates anyway, but the bot can
@@ -237,14 +239,17 @@ function evaluate(state: MatchState, seat: Seat): number {
 
 /**
  * The cards of `owner`'s deck that are not already visible on the table or in
- * their discard pile — the pool a fair opponent model may deal a plausible
- * hand from. This is deliberately blind to which of those cards are actually
- * in `owner`'s hand versus still in their deck, and to their deck's order:
- * only the *count* of hidden cards (their hand size) and which specific cards
- * could still be among them is used. It also assumes a full 54-card deck,
- * which is what every seat the bot ever faces plays with in practice.
+ * their discard pile — the pool the opponent model deals a plausible hand from.
+ * Blind to which of those cards are in `owner`'s hand versus still in their
+ * deck, and to the deck's order: only the *count* of hidden cards (their hand
+ * size) and which specific cards could be among them is used.
+ *
+ * `deck` is the opponent's actual built deck, which the bot is allowed to know
+ * — see `chooseMove`. Without it (a caller that has no room to ask) it falls
+ * back to assuming the classic 54, which is wrong for any built or doubled deck
+ * and is only a floor to keep the search running.
  */
-function hiddenPool(state: MatchState, owner: Seat): Card[] {
+function hiddenPool(state: MatchState, owner: Seat, deck?: readonly string[]): Card[] {
   const visible = new Set<string>();
   for (const caravan of state.players[owner].caravans) {
     for (const slot of caravan.slots) {
@@ -253,7 +258,10 @@ function hiddenPool(state: MatchState, owner: Seat): Card[] {
     }
   }
   for (const card of state.players[owner].discard) visible.add(card.id);
-  return buildDeck(owner).filter((card) => !visible.has(card.id));
+
+  if (!deck) return buildDeck(owner).filter((card) => !visible.has(card.id));
+  const kept = new Set(deck);
+  return fullPool(owner).filter((card) => kept.has(card.id) && !visible.has(card.id));
 }
 
 /**
@@ -264,8 +272,13 @@ function hiddenPool(state: MatchState, owner: Seat): Card[] {
  * has something to draw into; its order is fictional and is never read this
  * deep, since the search stops one reply short of anyone drawing from it.
  */
-function determinize(state: MatchState, owner: Seat, rng: Rng): MatchState {
-  const pool = shuffle([...hiddenPool(state, owner)], rng);
+function determinize(
+  state: MatchState,
+  owner: Seat,
+  rng: Rng,
+  deck?: readonly string[],
+): MatchState {
+  const pool = shuffle([...hiddenPool(state, owner, deck)], rng);
   const handSize = state.players[owner].hand.length;
   const world = structuredClone(state);
   world.players[owner].hand = pool.slice(0, handSize);
@@ -304,7 +317,13 @@ const HARD_SAMPLES = 8;
  * what keeps this from confidently playing a move that only works against
  * one specific hand the opponent probably doesn't hold.
  */
-function hardScore(state: MatchState, seat: Seat, move: Move, rng: Rng): number {
+function hardScore(
+  state: MatchState,
+  seat: Seat,
+  move: Move,
+  rng: Rng,
+  opponentDeck?: readonly string[],
+): number {
   let after: MatchState;
   try {
     after = applyMove(state, seat, move).state;
@@ -317,7 +336,7 @@ function hardScore(state: MatchState, seat: Seat, move: Move, rng: Rng): number 
 
   let total = 0;
   for (let i = 0; i < HARD_SAMPLES; i++) {
-    const sampled = determinize(after, opponent, rng);
+    const sampled = determinize(after, opponent, rng, opponentDeck);
     const reply = bestReply(sampled, opponent);
     const final = reply ? applyMove(sampled, opponent, reply).state : sampled;
     total += evaluate(final, seat);
@@ -325,7 +344,13 @@ function hardScore(state: MatchState, seat: Seat, move: Move, rng: Rng): number 
   return total / HARD_SAMPLES;
 }
 
-function chooseHardMove(state: MatchState, seat: Seat, moves: Move[], rng: Rng): Move | null {
+function chooseHardMove(
+  state: MatchState,
+  seat: Seat,
+  moves: Move[],
+  rng: Rng,
+  opponentDeck?: readonly string[],
+): Move | null {
   // The opening round has no opponent reply worth searching for and no board
   // for the lane-aware evaluation to read yet, so it reuses the quick heuristic.
   if (state.phase === 'opening') return chooseByOnePly(state, seat, 'hard', moves, rng);
@@ -333,7 +358,7 @@ function chooseHardMove(state: MatchState, seat: Seat, moves: Move[], rng: Rng):
   let best = -Infinity;
   let tied: Move[] = [];
   for (const move of moves) {
-    const score = hardScore(state, seat, move, rng);
+    const score = hardScore(state, seat, move, rng, opponentDeck);
     if (score > best) {
       best = score;
       tied = [move];
@@ -349,11 +374,21 @@ function chooseHardMove(state: MatchState, seat: Seat, moves: Move[], rng: Rng):
  * since `evaluateMatch` ends the match the moment the seat to move is out of
  * legal moves. Pure and seeded: same state, same difficulty, same choice, so a
  * match against the AI replays from its seed exactly like any other.
+ *
+ * `opponentDeck` is the card ids the opponent's built deck kept, used by `hard`
+ * to sample their hidden hand from the right cards. This is a deliberate
+ * asymmetry: deck composition is private — the protocol tells a player only
+ * `decksReady`, never the cards — so the bot knows something a human opponent
+ * does not. It was made explicit rather than left as the old assumption of a
+ * full 54, which was simply wrong the moment either seat trimmed a deck and
+ * badly wrong once a table can be dealt from 108. The bot still never sees the
+ * opponent's *hand* or the order of either deck.
  */
 export function chooseMove(
   state: MatchState,
   seat: Seat,
   difficulty: Difficulty,
+  opponentDeck?: readonly string[],
 ): Move | null {
   const rng = createRng(`${state.seed}:bot`, state.ply);
   const moves = candidates(state, seat, difficulty);
@@ -362,6 +397,6 @@ export function chooseMove(
     // case avoiding it is no longer an option.
     return pick(listLegalMoves(state, seat), rng);
   }
-  if (difficulty === 'hard') return chooseHardMove(state, seat, moves, rng);
+  if (difficulty === 'hard') return chooseHardMove(state, seat, moves, rng, opponentDeck);
   return chooseByOnePly(state, seat, difficulty, moves, rng);
 }
