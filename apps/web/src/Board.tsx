@@ -490,9 +490,30 @@ function CaravanView({
   const appendKey = caravanKey(seat, index);
   const appendMove = targets.get(appendKey);
 
-  // Departing cards still occupy their old index, so they count towards how
-  // tightly the stack has to pack while they animate away.
-  const rows = Math.max(caravan.slots.length, ...departing.map((d) => d.index + 1), 0);
+  /**
+   * Where each card sits while a departure is in flight, which is *not* where
+   * the snapshot puts it. The cards under a struck one must not close the gap
+   * before it has left: the snapshot's indices shift the instant the card is
+   * removed, so the survivors would slide up under a card still visibly sitting
+   * there, and the wrong card appears to be the one going.
+   *
+   * So the caravan keeps its old shape until the departure is done: the
+   * departed cards are spliced back in at the index they held, ascending, which
+   * reproduces the layout they left. When they are finally dropped the
+   * survivors close up for real — as a glide rather than a jump, see the `top`
+   * transition on `.slot`.
+   */
+  const layout = useMemo(() => {
+    const ids = caravan.slots.map((slot) => slot.card.id);
+    for (const gone of [...departing].sort((a, b) => a.index - b.index)) {
+      ids.splice(Math.min(gone.index, ids.length), 0, gone.card.id);
+    }
+    return new Map(ids.map((id, i) => [id, i]));
+  }, [caravan.slots, departing]);
+
+  // Departing cards still occupy a place in that layout, so they count towards
+  // how tightly the stack has to pack while they animate away.
+  const rows = Math.max(caravan.slots.length, layout.size);
 
   return (
     <div
@@ -516,7 +537,7 @@ function CaravanView({
             <div
               className={`slot ${dragOver === key ? 'drag-over' : ''}`}
               key={slot.card.id}
-              style={{ '--i': si } as never}
+              style={{ '--i': layout.get(slot.card.id) ?? si } as never}
             >
               <button
                 type="button"
@@ -565,7 +586,7 @@ function CaravanView({
             <div
               className={`slot ${gone.leaving ? 'departing' : 'struck'}`}
               key={`gone-${gone.card.id}`}
-              style={{ '--i': gone.index } as never}
+              style={{ '--i': layout.get(gone.card.id) ?? gone.index } as never}
               aria-hidden="true"
             >
               <span className="slot-card">

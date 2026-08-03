@@ -111,6 +111,40 @@ describe('Board', () => {
     });
   });
 
+  it('holds the cards under a struck one in place until it has gone', async () => {
+    // The 7 in the middle is destroyed, so the 9 above it would otherwise take
+    // the 7's index the instant the snapshot lands — sliding into the place of
+    // a card still sitting there, which reads as the 9 being the one removed.
+    const before = scenario({ p0: { caravans: ['3H,7S,9S', '', ''], hand: 'JD' } });
+    const jack = before.players[0].hand[0]!;
+    const outcome = applyMove(before, 0, {
+      type: 'play',
+      cardId: jack.id,
+      target: { seat: 0, caravan: 0, slot: 1 },
+    });
+
+    const { rerender, container } = render(
+      <Board view={redactFor(0, before)} onMove={() => {}} />,
+    );
+    const nine = () =>
+      [...container.querySelectorAll('.side-you .slot')].find(
+        (s) => s.querySelector('.card')?.getAttribute('aria-label') === '9 of spades',
+      )!;
+    expect(nine().getAttribute('style')).toContain('--i: 2');
+
+    rerender(
+      <Board view={redactFor(0, outcome.state)} events={outcome.events} onMove={() => {}} />,
+    );
+    // Still third, even though the snapshot now has it second.
+    expect(nine().getAttribute('style')).toContain('--i: 2');
+
+    // It closes up only once the destroyed card is off the table for good.
+    await waitFor(() => expect(nine().getAttribute('style')).toContain('--i: 1'), {
+      timeout: (STRIKE_MS + DEPARTURE_MS) * 3,
+    });
+    expect(container.querySelectorAll('.side-you .slot')).toHaveLength(2);
+  });
+
   it('pauses for a Joker without drawing it twice', async () => {
     // The Joker survives attached to its host, so the snapshot already has it —
     // unlike a Jack. All it contributes is the beat before the 7 it killed in

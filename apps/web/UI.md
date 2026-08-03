@@ -105,6 +105,7 @@ In `:root` (`styles.css`):
 | `--caravan-w` | Column width, currently `card-w × 1.75` |
 | `--fan-w` | Width reserved for the fanned hand |
 | `--slide` | The deal animation |
+| `--restack` | A caravan closing the gap after a destroyed card has gone |
 
 In `layout.ts`:
 
@@ -171,6 +172,16 @@ So a removal is staged. `useDepartures` holds the departed cards in place for
 `STRIKE_MS` (`.slot.struck` — a small flinch, nothing more) and only then lets
 them go (`.slot.departing`). The delay applies when a played card is known to be
 responsible; a disband has no such card, so its cards leave immediately.
+
+**The caravan keeps its old shape for the whole removal.** Slot positions come
+from `--i`, and the snapshot's indices shift the instant a card is taken out —
+so the cards under a struck one would close the gap while it is still visibly
+sitting in it, and the *survivor* sliding upward reads as the card being
+removed. `CaravanView.layout` fixes the positions instead: it splices the
+departed cards back in at the index they held and positions every card, living
+or leaving, by that. Only when the departures are dropped does the caravan close
+up, and `--restack` (a `top`/`bottom` transition on `.slot`) makes that a glide
+rather than a jump.
 
 Knowing *which* card is responsible is the one thing the board reads from the
 event feed rather than the snapshot. **A Jack is in no snapshot** — it destroys
