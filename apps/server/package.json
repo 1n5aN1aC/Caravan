@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "tournament": "tsx src/deck-tournament.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

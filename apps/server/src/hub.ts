@@ -11,7 +11,6 @@ import {
   DEFAULT_DECK_MODE,
   IllegalMoveError,
   applyMove,
-  buildPool,
   checkDeckSelection,
   createMatch,
   type DeckModeId,
@@ -20,6 +19,7 @@ import {
   type Seat,
 } from '@caravan/rules';
 import { chooseMove } from './bot.js';
+import { pickBotDeck } from './deck-strategies.js';
 import {
   InMemoryMatchStore,
   SeatTokens,
@@ -161,13 +161,15 @@ export class Hub {
     this.seats.set(code, [connection, null]);
     this.seat(connection, room, 0);
 
-    // Single player: the AI takes seat 1 immediately and plays the mode's whole
-    // pool — the same deck a human who removed nothing would bring — so the only
-    // thing the deal is still waiting on is the host's own deck.
+    // Single player: the AI takes seat 1 immediately, so the only thing the
+    // deal is still waiting on is the host's own deck. `hard` and `extreme` in
+    // `build` mode draw a random named strategy (see `pickBotDeck`); every
+    // other difficulty/mode still brings the whole pool, the same deck a
+    // human who removed nothing would.
     if (bot) {
       const botConnection = new BotConnection();
       room.claimed[1] = true;
-      room.decks[1] = buildPool(1, room.mode).map((card) => card.id);
+      room.decks[1] = pickBotDeck(bot, room.mode, room.seed, 1);
       this.seats.get(code)![1] = botConnection;
       this.sessions.set(botConnection, { connection: botConnection, code, seat: 1 });
     }
@@ -249,7 +251,7 @@ export class Hub {
     room.seed = generateSeed();
     room.state = null;
     room.moves = [];
-    room.decks = [null, room.bot ? buildPool(1, room.mode).map((card) => card.id) : null];
+    room.decks = [null, room.bot ? pickBotDeck(room.bot, room.mode, room.seed, 1) : null];
     room.rematch = [false, false];
     room.ended = false;
     this.maybeStart(room);
