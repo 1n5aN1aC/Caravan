@@ -12,7 +12,7 @@ export const RoomCode = z.string().regex(/^[A-Z]{4}$/);
  * How hard the AI opponent plays. Absent from a `create` message means the room
  * is an ordinary two-human table; the difficulty only exists for single player.
  */
-export const DifficultySchema = z.enum(['easy', 'medium', 'hard']);
+export const DifficultySchema = z.enum(['easy', 'medium', 'hard', 'extreme']);
 export type Difficulty = z.infer<typeof DifficultySchema>;
 
 /**

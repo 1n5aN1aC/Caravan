@@ -189,6 +189,11 @@ const DIFFICULTIES: Array<{ value: Difficulty; label: string; blurb: string }> =
     label: 'Hard',
     blurb: "Plans a move ahead and guesses at your hand — it can't see your cards.",
   },
+  {
+    value: 'extreme',
+    label: 'Extreme',
+    blurb: 'Hard, but it knows which cards you kept when you built your deck.',
+  },
 ];
 
 /**

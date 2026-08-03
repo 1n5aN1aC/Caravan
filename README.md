@@ -190,14 +190,16 @@ The AI is a `Connection` occupying seat 1, so presence, room status, redaction
 and "that room is full" all keep working with no special cases, and its moves go
 in through the same `move` path a socket's do — re-validated by the engine and
 recorded in `room.moves`, so a solo match replays from `{ seed, decks, moves }`
-like any other. It plays the full 54 and submits that deck at create time, which
+like any other. It plays the table's whole pool and submits that deck at create
+time — the deck a player who trimmed nothing would bring — which
 leaves the deal waiting only on the host. It answers after a fixed delay
 (`BOT_DELAY_MS`) so the table does not snap.
 
 `chooseMove` (`apps/server/src/bot.ts`) never disbands a caravan that wasn't
 already unsellable, and never returns anything `listLegalMoves` didn't already
-call legal. Past that, the three difficulties are different tiers of effort,
-not the same algorithm with a knob turned:
+call legal. Past that, the first three difficulties are different tiers of
+effort, not the same algorithm with a knob turned — and the fourth is the third
+told something it is not otherwise allowed to know:
 
 - **easy** — one ply, no search: scores each legal move by applying it and
   asking how much closer its own board is to the 21–26 band, and takes the
@@ -211,14 +213,57 @@ not the same algorithm with a knob turned:
   to (`sold`/`tied`/`outbid`/`overburdened`/`building`), not just its value, so
   it knows a 24 that only ties is worth less than a 24 that wins — something
   `medium`'s plain sum can't see, since two moves that leave its own board at
-  the same total score identically to it. For each candidate move, `hard`
-  looks one reply ahead: the opponent's best response, evaluated the same way.
+  the same total score identically to it. A sale is also priced by how much of
+  itself sits in one slot, since a 24 standing on a King-doubled 10 dies to a
+  single Jack where a 24 spread over five cards does not; and holding two of
+  the three tracks earns a bonus of its own, because two of three is the match
+  once the third resolves and a per-lane sum is linear in how many are sold.
+  Both of those are reasoned rather than measured — see `laneScore`. For each
+  candidate move, `hard`
+  looks one reply ahead: the opponent's best response, scored by the same
+  evaluation *and the same `spendCost`* the bot judges itself by — an opponent
+  model cheaper than that is a worse player than the bot, and every candidate
+  would be judged against a softer reply than the one actually coming.
   It does not know the opponent's actual hand or either deck's real draw
   order — even though both are sitting right there in `MatchState` — so
   that reply is judged against several sampled hands dealt from whatever
   cards the opponent could still plausibly be holding, and the scores are
-  averaged. See `hiddenPool` and `determinize` in `bot.ts` for exactly what
-  "plausibly" means.
+  averaged. Every candidate is judged against the *same* sampled hands, so
+  two close moves are separated by the position rather than by whose sample
+  happened to be kinder. What it believes those cards to be is only what a
+  player in that seat could work out: the table's deck mode is public, so it
+  assumes the whole of that mode's pool — the deck an opponent who trimmed
+  nothing would bring. That assumption is wrong about every card a trimmed
+  deck no longer holds, and it stays wrong all game. Weighting the worse half
+  of the sampled worlds to hedge against exactly that was tried and measured
+  as a loss — see `hardScore` for the numbers, and don't re-derive it. See
+  `hiddenPool` and `sampleWorlds` in `bot.ts` for what "plausibly" means.
+- **extreme** — `hard`, told which cards you actually kept when you built your
+  deck, and searching a ply deeper. It samples your hand from what you are
+  really holding cards from rather than from a 54 you may have cut half of; it
+  still never sees your hand itself, or the order of either deck. That
+  knowledge is something no human opponent could have, since deck composition
+  is private on the wire (a seat is told `decksReady`, never the cards), which
+  is why it is its own difficulty rather than something `hard` quietly does.
+
+  The third ply is there because the knowledge is worth nothing without it.
+  Measured against `hard` with everything else equal, deck-aware sampling alone
+  came out level — it reaches the search through the sampled hand, and at two
+  plies that hand decides exactly one greedy reply, far too small a lever to
+  spend it on. With the extra ply — the bot's own best answer to that reply, in
+  the same sampled world — `extreme` beats `hard` 35-13 over 48 paired matches
+  and the two-ply version of itself 40-8. Depth is the lever in this bot, which
+  is worth knowing before reaching for a cleverer evaluation. It costs roughly
+  twice `hard` per move.
+
+Two things every difficulty knows, because a scorer without them produces
+moves that are legal and pointless. A caravan past 26 is scored flatly, however
+far past: the ways back — a disband, or a Jack — are the same at 27 as at 40,
+so piling more onto a dead caravan is not progress, and doubling a card on one
+is not sabotage. And a card played is a card gone (`spendCost`), priced small
+enough to matter only between moves the evaluation cannot otherwise tell apart
+— so when nothing on the table can be improved, the bot pitches its least
+useful card instead of burning a Jack on nothing.
 
 Randomness — both the sampling and the tie-breaks — comes from the engine's
 seeded PRNG, so the same position always yields the same choice at every

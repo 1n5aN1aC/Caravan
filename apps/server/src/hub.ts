@@ -384,7 +384,13 @@ export class Hub {
       const current = this.store.get(room.code);
       if (!current?.state || current.ended) return;
       if (current.state.turn !== 1 || current.state.phase === 'over') return;
-      const move = chooseMove(current.state, 1, room.bot!, current.decks[0] ?? undefined);
+      // The whole table is handed over; `chooseMove` decides which difficulty
+      // is allowed to act on which part of it, so the private half (the
+      // opponent's built deck) cannot leak into one that plays without it.
+      const move = chooseMove(current.state, 1, room.bot!, {
+        mode: current.mode,
+        deck: current.decks[0] ?? undefined,
+      });
       if (move) this.move(connection, move);
     }, BOT_DELAY_MS);
 
